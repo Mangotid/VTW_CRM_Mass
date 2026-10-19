@@ -185,6 +185,16 @@ def cmd_hover(args: argparse.Namespace) -> None:
         subprocess.run(["xdotool", "mousemove", "1270", "790"], check=False)
 
 
+def cmd_health(args: argparse.Namespace) -> None:
+    """GET the bridge's /health from inside the container (the secret is used, never printed)."""
+    import urllib.request
+
+    secret = os.environ.get("BRIDGE_SECRET", "")
+    req = urllib.request.Request("http://127.0.0.1:8101/health", headers={"X-Bridge-Secret": secret})
+    with urllib.request.urlopen(req, timeout=8) as resp:
+        print(resp.read().decode())
+
+
 def cmd_viber_restart(args: argparse.Namespace) -> None:
     """Restart only the Viber process (e.g. so it sees a notification server at startup)."""
     subprocess.run(["supervisorctl", "-c", "/etc/supervisor/viber-bridge.conf", "restart", "viber"], check=True)
@@ -348,6 +358,9 @@ def main() -> int:
     p.add_argument("--psm", type=int, default=6)
     p.add_argument("--digits", action="store_true", help="OCR digits and + only (phone numbers)")
     p.set_defaults(fn=cmd_hover)
+
+    p = sub.add_parser("health", help="the bridge's /health JSON")
+    p.set_defaults(fn=cmd_health)
 
     p = sub.add_parser("viber-restart", help="restart the Viber process via supervisorctl")
     p.set_defaults(fn=cmd_viber_restart)
