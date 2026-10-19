@@ -122,9 +122,10 @@ docs/                     viber-db-schema.md, runbook.md, whatsapp-onboarding.md
 - Спільне ядро мостів: `common/bridge_core` (контракт, SQLite-черги, SenderLoop, OdooDelivery, FastAPI).
   Образи збираються з кореня репозиторію (`context: ..`), корінь має `.dockerignore`.
 - Фаза 3: `telegram-userbot/` написаний, 12 тестів; з реальним Telegram ще не запускався.
-- Фаза 1: `ops/bootstrap.sh`, `ops/wireguard/` написані (shellcheck чистий), на реальному хості ще не запускались.
-  Прийняті за замовчуванням (питання до власника відкриті): WG `10.77.0.0/24`, hub `.1`, Odoo `.2`, UDP 51820;
-  мости → Odoo через `http://10.77.0.2:8069` (порт `web` на WG-IP); користувач `deploy`; SSH-порт не змінюється.
+- Фаза 1 виконана (2026-10-19), hostname hub — `pdm-hub`. Публічні IP у репозиторій не пишемо.
+  WG `10.77.0.0/24`, hub `.1`, Odoo `.2`, UDP 51820. Користувач `deploy` (sudo, docker); `pdm_mess` — без docker.
+  Мости → Odoo через `http://10.77.0.2:8069`: на Odoo окремий контейнер `hub-gateway` (socat → `pdm_odoo:8069`,
+  мережа `pdm`), сервіс `web` не змінювався. HDD під бекапи на hub немає — крок `backup` пропущено.
 
 Відомі інваріанти viber-bridge:
 - Ніколи не вставляти текст, доки `verify_target(phone)` не довів, що активний чат — цього номера.

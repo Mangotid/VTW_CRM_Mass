@@ -77,6 +77,11 @@ swap 4G, `swappiness` 10; `Europe/Kyiv`; Docker `29.8.2`, compose `5.5.1`, 5 п�
 
 ## Відомі нюанси
 
+- **Чужі drop-in sshd.** sshd бере перше значення, файли `sshd_config.d/` читаються за алфавітом. Провайдерський
+  `00-*.conf` з `PasswordAuthentication yes` перекриває наш `10-pdm-hardening.conf`. Крок `ssh` перевіряє
+  фактичні значення через `sshd -T` і зупиняється, показавши файл і рядок; виправити його треба вручну
+  (`sed -i 's/^PasswordAuthentication yes/PasswordAuthentication no/' <файл>`), потім `sshd -t && systemctl reload ssh`.
+
 - **Docker і ufw.** Опубліковані порти контейнерів обходять `ufw`. Тому всі сервіси публікують
   порти лише на WireGuard-адресі (`10.77.0.1:...`), а не на `0.0.0.0`. Це перевіряється в ревʼю compose-файлів.
 - **Docker стартує після `wg0`.** Інакше прив'язка до `10.77.0.1` падає з `cannot assign requested address`.

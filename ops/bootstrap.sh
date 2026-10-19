@@ -147,7 +147,8 @@ step_ssh() {
 
   local root_login=prohibit-password
   [[ "$SSH_DISABLE_ROOT_LOGIN" == yes ]] && root_login=no
-  # 10- sorts before cloud-init's 50-cloud-init.conf; sshd uses the first value it reads.
+  # sshd uses the first value it reads; drop-ins are read in lexical order. 10- beats
+  # cloud-init's 50-, but a provider file like 00-*.conf can still win: checked below.
   if write_if_changed /etc/ssh/sshd_config.d/10-pdm-hardening.conf 644 <<EOF
 # Managed by ops/bootstrap.sh
 PubkeyAuthentication yes
@@ -169,6 +170,25 @@ EOF
   else
     log "sshd hardening already in place"
   fi
+  check_sshd_effective "$root_login"
+}
+
+# Fails if another sshd config file overrides our drop-in (effective values from sshd -T).
+check_sshd_effective() {
+  local want_root=$1 eff key want got bad=0
+  install -d -m 755 /run/sshd
+  eff=$(sshd -T 2>/dev/null) || die "sshd -T failed"
+  for pair in passwordauthentication=no kbdinteractiveauthentication=no "permitrootlogin=$want_root"; do
+    key=${pair%%=*} want=${pair#*=}
+    got=$(awk -v k="$key" '$1 == k { print $2; exit }' <<<"$eff")
+    [[ "$got" == "$want" ]] && continue
+    bad=1
+    warn "effective $key is '$got', expected '$want'. Set in:"
+    grep -HinE "^[[:space:]]*${key}[[:space:]]" /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null \
+      | while IFS= read -r line; do warn "  $line"; done
+  done
+  ((bad == 0)) || die "another sshd config file overrides 10-pdm-hardening.conf (first value wins); fix the lines above, then: sshd -t && systemctl reload ssh"
+  log "sshd effective config ok: password login off, PermitRootLogin $want_root"
 }
 
 step_firewall() {
