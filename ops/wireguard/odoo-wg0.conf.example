@@ -1,0 +1,14 @@
+# Odoo server: /etc/wireguard/wg0.conf (rendered by wg-setup.sh odoo)
+# No secrets here: private key and PSK are loaded from files by PostUp.
+# Odoo side initiates the tunnel: no inbound UDP port needs to be opened on this server.
+[Interface]
+Address = {{ODOO_IP}}/24
+PostUp = wg set %i private-key {{KEY_FILE}}
+{{PSK_POSTUP}}
+
+# Messenger hub
+[Peer]
+PublicKey = {{PEER_PUBLIC_KEY}}
+Endpoint = {{HUB_ENDPOINT}}:{{WG_PORT}}
+AllowedIPs = {{HUB_IP}}/32
+PersistentKeepalive = 25

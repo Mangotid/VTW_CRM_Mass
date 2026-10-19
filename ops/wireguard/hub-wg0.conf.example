@@ -1,0 +1,12 @@
+# Messenger hub: /etc/wireguard/wg0.conf (rendered by wg-setup.sh hub)
+# No secrets here: private key and PSK are loaded from files by PostUp.
+[Interface]
+Address = {{HUB_IP}}/24
+ListenPort = {{WG_PORT}}
+PostUp = wg set %i private-key {{KEY_FILE}}
+{{PSK_POSTUP}}
+
+# Odoo server
+[Peer]
+PublicKey = {{PEER_PUBLIC_KEY}}
+AllowedIPs = {{ODOO_IP}}/32

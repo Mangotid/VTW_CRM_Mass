@@ -1,0 +1,18 @@
+# Build context is the repo root (services share common/). Keep secrets and data out.
+**/.env
+**/.env.*
+!**/.env.example
+**/data
+**/sessions
+**/*.session
+**/*.session-journal
+**/*.db
+**/*.sqlite*
+**/debug
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/tests
+.git
+ops
+docs

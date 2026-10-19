@@ -1,0 +1,38 @@
+# Copy to ops/bootstrap.conf, fill in, then: sudo ./ops/bootstrap.sh
+# bootstrap.conf is git-ignored (host-specific). No secrets here: only a PUBLIC SSH key.
+
+# --- Deploy user ---
+DEPLOY_USER=deploy
+# Public key(s) allowed to log in as DEPLOY_USER (one per line inside the quotes).
+DEPLOY_SSH_PUBKEYS="ssh-ed25519 AAAA...replace... you@your-pc"
+# yes = add to "sudo" group. sudo then needs the user's password: set it yourself with `passwd deploy`.
+DEPLOY_SUDO=yes
+
+# --- SSH ---
+# Must match the port sshd ALREADY listens on. The script does not change the SSH port.
+SSH_PORT=22
+# yes = PermitRootLogin no. Only after you confirmed key login as DEPLOY_USER works.
+SSH_DISABLE_ROOT_LOGIN=yes
+
+# --- WireGuard ---
+WG_PORT=51820
+
+# --- System ---
+TIMEZONE=Europe/Kyiv
+SWAP_SIZE_GB=4
+# yes = unattended-upgrades may reboot at AUTO_REBOOT_TIME when a reboot is required.
+AUTO_REBOOT=no
+AUTO_REBOOT_TIME=04:30
+
+# --- Backup HDD ---
+# UUID of an EXISTING filesystem on the backup HDD (see: lsblk -f). Empty = skip this step.
+# The script never formats disks.
+BACKUP_UUID=
+BACKUP_MOUNT=/mnt/backup
+
+# --- Docker (official repo, pinned; packages are put on hold) ---
+# List available: apt-cache madison docker-ce
+DOCKER_CE_VERSION=5:29.8.2-1~ubuntu.24.04~noble
+CONTAINERD_VERSION=2.3.6-1~ubuntu.24.04~noble
+DOCKER_BUILDX_VERSION=0.37.1-1~ubuntu.24.04~noble
+DOCKER_COMPOSE_VERSION=5.5.1-1~ubuntu.24.04~noble
