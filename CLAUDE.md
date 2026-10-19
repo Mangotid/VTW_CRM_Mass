@@ -139,6 +139,14 @@ Viber, фаза 2 (2026-10-19): QR-вхід виконано. `viber.db` **за�
 UID у контейнерах — не 1000 (Viber 10001, Telegram 10002): інакше користувач хоста з UID 1000 бачить сесії
 месенджерів через `/proc/<pid>/root`.
 
+Фаза 5 (Viber) виконана 2026-10-19: у `crm_messenger` (версія 19.0.2.1.0) режим каналу official|bridge,
+маршрути `/messenger/bridge/<channel>/incoming|status`, налаштування «Міст Viber» + «Перевірити міст».
+Viber на hub працює в режимі bridge з Odoo в обидва боки (перевірено з картки клієнта).
+Odoo: база `portdemaison` (`dbfilter = ^portdemaison$`), аддони `~/WShop/crm/addons` → `/mnt/extra-addons`.
+Код модулів Odoo не в git на сервері; робоча копія Claude — `~/odoo-addons` (локальний git, знімок + зміни).
+Встановлення: архів → `addons/`, `docker compose run --rm web odoo -d portdemaison -u crm_messenger --stop-after-init`,
+`docker compose restart web`; резервні копії модуля — `~/WShop/crm/backup/`.
+
 Відомі інваріанти viber-bridge (схема «сповіщення + AT-SPI + OCR», `docs/viber-ui-research.md`):
 - Усі дії з вікном Viber — під одним `ui_lock`; після кожної — нейтральний стан (чат `VIBER_NEUTRAL_PHONE`, без поля введення).
 - Ніколи не вставляти текст, доки номер із заголовка (наведення на статус + OCR цифр) не збігся з цільовим.
