@@ -113,6 +113,29 @@ def cmd_key(args: argparse.Namespace) -> None:
     cmd_state(args)
 
 
+def cmd_window(args: argparse.Namespace) -> None:
+    """Minimize / activate the main Viber window (messengers do not notify while focused)."""
+    ids = subprocess.run(["xdotool", "search", "--onlyvisible", "--class", args.wm_class],
+                         capture_output=True, text=True).stdout.split()
+    if args.action == "list" or not ids:
+        print(f"visible windows of class {args.wm_class}: {ids}")
+        if not ids:
+            return
+    for wid in ids:
+        if args.action == "minimize":
+            subprocess.run(["xdotool", "windowminimize", wid], check=True)
+        elif args.action == "activate":
+            subprocess.run(["xdotool", "windowactivate", "--sync", wid], check=False)
+    time.sleep(1)
+    active = subprocess.run(["xdotool", "getactivewindow"], capture_output=True, text=True).stdout.strip()
+    print(f"{args.action}: windows={ids} active_now={active or None}")
+
+
+def cmd_viber_restart(args: argparse.Namespace) -> None:
+    """Restart only the Viber process (e.g. so it sees a notification server at startup)."""
+    subprocess.run(["supervisorctl", "-c", "/etc/supervisor/viber-bridge.conf", "restart", "viber"], check=True)
+
+
 def cmd_open(args: argparse.Namespace) -> None:
     phone = args.phone if args.phone.startswith("+") else "+" + args.phone
     if not phone[1:].isdigit():
@@ -226,6 +249,14 @@ def main() -> int:
     p.add_argument("key")
     p.add_argument("--wait", type=float, default=1.5)
     p.set_defaults(fn=cmd_key)
+
+    p = sub.add_parser("window", help="list / minimize / activate the Viber window")
+    p.add_argument("action", choices=["list", "minimize", "activate"])
+    p.add_argument("--wm-class", default="ViberPC")
+    p.set_defaults(fn=cmd_window)
+
+    p = sub.add_parser("viber-restart", help="restart the Viber process via supervisorctl")
+    p.set_defaults(fn=cmd_viber_restart)
 
     p = sub.add_parser("open", help="open viber://chat deep link (no typing)")
     p.add_argument("phone")
