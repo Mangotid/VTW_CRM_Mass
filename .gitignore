@@ -1,0 +1,52 @@
+# Secrets — only .env.example is committed
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Messenger sessions and runtime data
+data/
+volumes/
+**/data/
+**/sessions/
+*.session
+*.session-journal
+*.db
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
+.ViberPC/
+
+# Debug screenshots
+debug/
+**/debug/
+
+# Backups
+backup/
+backups/
+*.tar
+*.tar.gz
+*.tar.zst
+*.bak
+
+# WireGuard keys
+*.key
+ops/wireguard/*.conf
+!ops/wireguard/*.conf.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
