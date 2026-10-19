@@ -25,14 +25,18 @@ debug/
 **/debug/
 
 # Backups
-backup/
-backups/
+/backup/
+/backups/
 *.tar
 *.tar.gz
 *.tar.zst
 *.bak
 
+# Host-specific ops config
+ops/bootstrap.conf
+
 # WireGuard keys
+*.psk
 *.key
 ops/wireguard/*.conf
 !ops/wireguard/*.conf.example

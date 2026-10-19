@@ -115,7 +115,9 @@ docs/                     viber-db-schema.md, runbook.md, whatsapp-onboarding.md
 - Фаза 2 (частково): API, черги, ліміти, доставка в Odoo, Docker-образ написані; тести `viber-bridge/tests`.
   Чекають живого Viber: SQL за схемою `viber.db` (`docs/viber-db-schema.md`) і `verify_target()`.
   До того `VIBER_SEND_ENABLED=false`. Образ ще не збирався.
-- Фаза 1 (скрипти `ops/`) ще не зроблена.
+- Фаза 1: `ops/bootstrap.sh`, `ops/wireguard/` написані (shellcheck чистий), на реальному хості ще не запускались.
+  Прийняті за замовчуванням (питання до власника відкриті): WG `10.77.0.0/24`, hub `.1`, Odoo `.2`, UDP 51820;
+  мости → Odoo через `http://10.77.0.2:8069` (порт `web` на WG-IP); користувач `deploy`; SSH-порт не змінюється.
 
 Відомі інваріанти viber-bridge:
 - Ніколи не вставляти текст, доки `verify_target(phone)` не довів, що активний чат — цього номера.
