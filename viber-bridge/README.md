@@ -126,6 +126,15 @@ python3 -m venv .venv && .venv/bin/pip install --no-deps -r requirements.lock &&
 
 ## Дані й безпека
 
+Процеси в контейнері працюють під UID `10001` (не 1000: користувач хоста з тим самим UID мав би доступ до сесії
+через `/proc/<pid>/root`). Томи, створені старішим образом (UID 1000), треба один раз переписати:
+
+```bash
+docker compose down
+docker run --rm -v pdm-viber_viber_profile:/a -v pdm-viber_viber_state:/b -v pdm-viber_viber_debug:/c \
+  ubuntu:noble-20260911 chown -R 10001:10001 /a /b /c
+```
+
 | Том             | Вміст | Чутливість |
 |-----------------|-------|------------|
 | `viber_profile` | сесія акаунта Viber, `viber.db` | доступ до акаунта — лише бекап (root, 600) |

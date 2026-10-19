@@ -6,7 +6,8 @@ FROM ubuntu:noble-20260911
 # Get it with: curl -fsSL "$VIBER_DEB_URL" | sha256sum
 ARG VIBER_DEB_URL=https://download.cdn.viber.com/cdn/desktop/Linux/viber.deb
 ARG VIBER_DEB_SHA256
-ARG APP_UID=1000
+# Not 1000: that is the first login user on the host, who could then reach the session via /proc/<pid>/root.
+ARG APP_UID=10001
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
@@ -21,7 +22,7 @@ RUN apt-get update \
       ca-certificates curl tzdata \
       xvfb fluxbox x11vnc novnc websockify supervisor \
       xclip xdotool xdg-utils x11-utils imagemagick dbus-x11 \
-      python3 python3-venv sqlite3 \
+      python3 python3-venv sqlite3 dbus-bin \
       at-spi2-core gir1.2-atspi-2.0 python3-gi \
       fonts-dejavu-core fonts-noto-color-emoji \
  && rm -rf /var/lib/apt/lists/* \

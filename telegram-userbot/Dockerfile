@@ -2,7 +2,8 @@
 # Build context: repository root (see docker-compose.yml).
 FROM python:3.12.14-slim-bookworm
 
-ARG APP_UID=1000
+# Not 1000: that is the first login user on the host, who could then reach the session via /proc/<pid>/root.
+ARG APP_UID=10002
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     TZ=Europe/Kyiv \

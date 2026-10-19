@@ -130,6 +130,13 @@ docs/                     viber-db-schema.md, runbook.md, whatsapp-onboarding.md
 Фонові цикли мостів запускаються через `supervise()` (`extra_tasks()` → `{ім'я: фабрика}`): падіння логується
 і цикл перезапускається.
 
+Viber, фаза 2 (2026-10-19): QR-вхід виконано. `viber.db` **зашифрована** (Viber 27.3) — план «вхідні з viber.db»
+не працює. Досліджується читання UI через AT-SPI (погоджено власником): `QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1`,
+шина `at-spi-bus-launcher` стартує до Viber, дамп дерева без текстів — `viber-bridge/tools/atspi_dump.py`.
+
+UID у контейнерах — не 1000 (Viber 10001, Telegram 10002): інакше користувач хоста з UID 1000 бачить сесії
+месенджерів через `/proc/<pid>/root`.
+
 Відомі інваріанти viber-bridge:
 - Ніколи не вставляти текст, доки `verify_target(phone)` не довів, що активний чат — цього номера.
 - Повідомлення, що зависли в `sending` після падіння, → `error`, без повторної відправки.
