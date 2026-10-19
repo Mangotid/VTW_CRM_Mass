@@ -23,6 +23,21 @@ RUN apt-get update \
       xclip xdotool xdg-utils x11-utils imagemagick dbus-x11 \
       python3 python3-venv sqlite3 \
       fonts-dejavu-core fonts-noto-color-emoji \
+ && rm -rf /var/lib/apt/lists/* \
+ && install -d -m 1777 /tmp/.X11-unix
+
+# viber.deb bundles Qt but declares only a few of the system libs it links against.
+# List = NEEDED of Viber, libqxcb, QtWebEngineProcess and bundled Qt libs, minus bundled ones.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      libasound2t64 libatomic1 libbrotli1 libdbus-1-3 libdrm2 libexpat1 libfontconfig1 libfreetype6 \
+      libegl1 libgbm1 libgl1 libgl1-mesa-dri libglx0 libopengl0 \
+      libglib2.0-0t64 libgssapi-krb5-2 libnspr4 libnss3 libopus0 libpulse0 libsnappy1v5 libssl3t64 libudev1 \
+      libice6 libsm6 libx11-6 libx11-xcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 libxi6 \
+      libxkbcommon0 libxkbcommon-x11-0 libxkbfile1 libxrandr2 libxrender1 libxshmfence1 libxss1 libxtst6 \
+      libxcb1 libxcb-dri3-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render0 \
+      libxcb-render-util0 libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-util1 libxcb-xfixes0 libxcb-xkb1 \
+      libxml2 libxslt1.1 libzstd1 zlib1g \
  && rm -rf /var/lib/apt/lists/*
 
 RUN test -n "$VIBER_DEB_SHA256" || { echo "VIBER_DEB_SHA256 build arg is required" >&2; exit 1; } \
@@ -31,7 +46,10 @@ RUN test -n "$VIBER_DEB_SHA256" || { echo "VIBER_DEB_SHA256 build arg is require
  && apt-get update \
  && apt-get install -y --no-install-recommends /tmp/viber.deb \
  && rm -rf /tmp/viber.deb /var/lib/apt/lists/* \
- && test -x /opt/viber/Viber
+ && test -x /opt/viber/Viber \
+ && missing=$(ldd /opt/viber/Viber /opt/viber/plugins/platforms/libqxcb.so /opt/viber/libexec/QtWebEngineProcess \
+      | awk '/not found/ {print $1}' | sort -u) \
+ && { [ -z "$missing" ] || { echo "Viber needs missing libs (exit 127 at runtime):" $missing >&2; exit 1; }; }
 
 # Ubuntu images ship user "ubuntu" with uid 1000; replace it with "viber".
 RUN (userdel -r ubuntu 2>/dev/null || true) \
