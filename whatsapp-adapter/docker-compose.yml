@@ -1,0 +1,116 @@
+# WhatsApp: Evolution API (Baileys, no browser) + its Postgres + the contract adapter.
+# Only the adapter API is published, and only on the hub's WireGuard address.
+# Evolution API and Postgres have no published ports; Evolution is reachable only from the adapter.
+name: pdm-whatsapp
+
+services:
+  evolution-postgres:
+    image: postgres:16.15-alpine3.24
+    environment:
+      POSTGRES_DB: evolution
+      POSTGRES_USER: evolution
+      POSTGRES_PASSWORD: ${EVOLUTION_DB_PASSWORD:?set EVOLUTION_DB_PASSWORD in .env}
+    volumes:
+      - wa_pg:/var/lib/postgresql/data
+    networks: [wa_internal]
+    mem_limit: 256m
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evolution -d evolution"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: &rotated
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  evolution-api:
+    image: evoapicloud/evolution-api:v2.3.7
+    depends_on:
+      evolution-postgres:
+        condition: service_healthy
+    # Only Evolution's own settings — the adapter's secrets are not passed in.
+    environment:
+      SERVER_TYPE: http
+      SERVER_PORT: "8080"
+      SERVER_URL: http://evolution-api:8080
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:?set EVOLUTION_API_KEY in .env}
+      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "false"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://evolution:${EVOLUTION_DB_PASSWORD}@evolution-postgres:5432/evolution?schema=evolution_api
+      DATABASE_CONNECTION_CLIENT_NAME: pdm_hub
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      # Customer messages, chats and contacts are not kept in Evolution: Odoo is the record.
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "false"
+      DATABASE_SAVE_MESSAGE_UPDATE: "false"
+      DATABASE_SAVE_DATA_CONTACTS: "false"
+      DATABASE_SAVE_DATA_CHATS: "false"
+      DATABASE_SAVE_DATA_LABELS: "false"
+      DATABASE_SAVE_DATA_HISTORIC: "false"
+      DATABASE_SAVE_IS_ON_WHATSAPP: "true"
+      CACHE_REDIS_ENABLED: "false"
+      CACHE_LOCAL_ENABLED: "true"
+      TELEMETRY_ENABLED: "false"
+      WEBHOOK_GLOBAL_ENABLED: "false"
+      CONFIG_SESSION_PHONE_CLIENT: PDM Messenger Hub
+      CONFIG_SESSION_PHONE_NAME: Chrome
+      DEL_INSTANCE: "false"
+      LOG_LEVEL: ERROR,WARN
+      LOG_BAILEYS: error
+      LOG_COLOR: "false"
+      LANGUAGE: en
+      TZ: Europe/Kyiv
+    volumes:
+      - wa_instances:/evolution/instances
+    # wa_egress: Baileys must reach WhatsApp servers; wa_internal: Postgres + adapter.
+    networks: [wa_internal, wa_egress]
+    mem_limit: 768m
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    # Evolution 2.3.7 console.log()s every received message (with text) regardless of LOG_LEVEL.
+    # Customer texts must not end up in logs, so its output is discarded; health comes from the adapter.
+    logging:
+      driver: none
+
+  whatsapp-adapter:
+    build:
+      context: ..
+      dockerfile: whatsapp-adapter/Dockerfile
+    image: pdm/whatsapp-adapter:0.1.0
+    depends_on:
+      - evolution-api
+    env_file: .env
+    environment:
+      TZ: Europe/Kyiv
+      DATA_DIR: /data
+      EVOLUTION_URL: http://evolution-api:8080
+      ADAPTER_WEBHOOK_URL: http://whatsapp-adapter:8103/evolution/webhook
+    ports:
+      - "${WG_BIND_IP:?set WG_BIND_IP in .env}:${WA_ADAPTER_PORT:-8103}:8103"
+    volumes:
+      - wa_state:/data
+    # wa_egress also carries callbacks to Odoo over WireGuard (10.77.0.2).
+    networks: [wa_internal, wa_egress]
+    mem_limit: 256m
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    logging: *rotated
+
+networks:
+  wa_internal:
+    internal: true
+  wa_egress: {}
+
+volumes:
+  wa_pg:          # Evolution DB: instance + WhatsApp session keys (sensitive)
+  wa_instances:   # Evolution instance files (sensitive)
+  wa_state:       # adapter SQLite queues (sensitive)

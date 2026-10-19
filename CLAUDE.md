@@ -126,6 +126,9 @@ docs/                     viber-db-schema.md, runbook.md, whatsapp-onboarding.md
   акаунт авторизований, Odoo у режимі bridge для Telegram — перевірено власником в обидва боки.
   Відкрите питання: у режимі bridge всі вихідні Telegram з Odoo йдуть від userbot за номером; клієнти
   лише з ботом (без номера в картці) недосяжні — запасний варіант «немає номера → бот» не зроблено.
+- Фаза 4: `whatsapp-adapter/` написаний (Evolution API v2.3.7 + Postgres 16.15, адаптер на bridge_core, 12 тестів;
+  API Evolution звірено з вихідним кодом 2.3.7). Вхід — код прив'язки (`login.py`). На hub ще не запускався.
+  Логи Evolution вимкнено (він пише тексти повідомлень у stdout); повідомлення в БД Evolution не зберігаються.
 - Фаза 1 виконана (2026-10-19), hostname hub — `pdm-hub`. Публічні IP у репозиторій не пишемо.
   WG `10.77.0.0/24`, hub `.1`, Odoo `.2`, UDP 51820. Користувач `deploy` (sudo, docker); `pdm_mess` — без docker.
   Мости → Odoo через `http://10.77.0.2:8069`: на Odoo окремий контейнер `hub-gateway` (socat → `pdm_odoo:8069`,
