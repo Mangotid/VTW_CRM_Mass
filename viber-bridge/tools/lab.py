@@ -185,6 +185,16 @@ def cmd_hover(args: argparse.Namespace) -> None:
         subprocess.run(["xdotool", "mousemove", "1270", "790"], check=False)
 
 
+def cmd_queue_retry_now(args: argparse.Namespace) -> None:
+    """Make pending Odoo callbacks due now (after fixing Odoo config); deletes nothing."""
+    import sqlite3
+
+    db = sqlite3.connect("/data/bridge.sqlite3", timeout=10)
+    with db:
+        n = db.execute("UPDATE callbacks SET next_attempt_at = 0").rowcount
+    print(f"{n} callback(s) due now")
+
+
 def cmd_health(args: argparse.Namespace) -> None:
     """GET the bridge's /health from inside the container (the secret is used, never printed)."""
     import urllib.request
@@ -376,6 +386,9 @@ def main() -> int:
 
     p = sub.add_parser("queue", help="pending Odoo callbacks (read-only, shaped)")
     p.set_defaults(fn=cmd_queue)
+
+    p = sub.add_parser("queue-retry-now", help="make pending Odoo callbacks due now (deletes nothing)")
+    p.set_defaults(fn=cmd_queue_retry_now)
 
     p = sub.add_parser("health", help="the bridge's /health JSON")
     p.set_defaults(fn=cmd_health)
