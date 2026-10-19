@@ -122,7 +122,10 @@ docs/                     viber-db-schema.md, runbook.md, whatsapp-onboarding.md
   До того `SEND_ENABLED=false`. Образ ще не збирався.
 - Спільне ядро мостів: `common/bridge_core` (контракт, SQLite-черги, SenderLoop, OdooDelivery, FastAPI).
   Образи збираються з кореня репозиторію (`context: ..`), корінь має `.dockerignore`.
-- Фаза 3: `telegram-userbot/` написаний, 12 тестів; з реальним Telegram ще не запускався.
+- Фаза 3 виконана 2026-10-19: `telegram-userbot` на hub (порт 8102, UID 10002, окремий BRIDGE_SECRET),
+  акаунт авторизований, Odoo у режимі bridge для Telegram — перевірено власником в обидва боки.
+  Відкрите питання: у режимі bridge всі вихідні Telegram з Odoo йдуть від userbot за номером; клієнти
+  лише з ботом (без номера в картці) недосяжні — запасний варіант «немає номера → бот» не зроблено.
 - Фаза 1 виконана (2026-10-19), hostname hub — `pdm-hub`. Публічні IP у репозиторій не пишемо.
   WG `10.77.0.0/24`, hub `.1`, Odoo `.2`, UDP 51820. Користувач `deploy` (sudo, docker); `pdm_mess` — без docker.
   Мости → Odoo через `http://10.77.0.2:8069`: на Odoo окремий контейнер `hub-gateway` (socat → `pdm_odoo:8069`,
