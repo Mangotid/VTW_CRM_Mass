@@ -64,7 +64,9 @@ RUN (userdel -r ubuntu 2>/dev/null || true) \
 COPY viber-bridge/requirements.lock /opt/bridge/requirements.lock
 RUN python3 -m venv /opt/bridge/venv \
  && /opt/bridge/venv/bin/pip install --no-cache-dir --no-deps -r /opt/bridge/requirements.lock \
- && /opt/bridge/venv/bin/pip check
+ && /opt/bridge/venv/bin/pip check \
+ && ln -s /usr/lib/python3/dist-packages/gi /opt/bridge/venv/lib/python3.12/site-packages/gi \
+ && /opt/bridge/venv/bin/python -c "import gi; gi.require_version('Atspi', '2.0'); from gi.repository import Atspi, Gio, GLib"
 
 COPY common/bridge_core /opt/bridge/bridge_core
 COPY viber-bridge/app /opt/bridge/app

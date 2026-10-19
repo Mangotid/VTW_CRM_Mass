@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -12,10 +11,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "common"))
 from bridge_core.store import Store  # noqa: E402
 
 from app.config import Settings  # noqa: E402
-from app.viber_db import IncomingEvent, OutgoingEvent  # noqa: E402
-from app.viber_ui import TargetNotVerified  # noqa: E402
+from app.viber_ui import ChatOpen, UiError  # noqa: E402
 
 SECRET = "s" * 40
+NEUTRAL = "+380000000000"
 
 
 @pytest.fixture
@@ -25,9 +24,9 @@ def settings(tmp_path: Path) -> Settings:
         data_dir=tmp_path / "data", debug_dir=tmp_path / "debug", debug_retention_days=7,
         timezone=ZoneInfo("Europe/Kyiv"), sending_enabled=True,
         send_delay_min=0, send_delay_max=0, daily_limit_total=3, daily_limit_new_contacts=2,
-        send_confirm_timeout=0.2, display=":0", viber_home=tmp_path / "viber",
-        viber_account=None, viber_open_cmd="true", viber_window_class="ViberPC",
-        ui_step_delay=0, watch_interval=0.01, callback_stale_after=600,
+        display=":0", viber_home=tmp_path / "viber", viber_account=None, viber_open_cmd="true",
+        viber_window_class="ViberPC", neutral_phone=NEUTRAL, ui_timeout=0.2, hover_delay=0,
+        paste_check=True, callback_stale_after=600,
     )
 
 
@@ -38,48 +37,58 @@ def store(settings: Settings) -> Store:
     s.close()
 
 
-class FakeDb:
-    def __init__(self) -> None:
-        self.found = True
-        self.latest = 100
-        self.incoming: list[IncomingEvent] = []
-        self.outgoing: list[OutgoingEvent] = []
-
-    def locate(self) -> Path | None:
-        return Path("/fake/viber.db") if self.found else None
-
-    def latest_event_id(self) -> int:
-        return self.latest
-
-    def incoming_since(self, after_event_id: int, limit: int = 100) -> list[IncomingEvent]:
-        return [e for e in self.incoming if e.event_id > after_event_id][:limit]
-
-    def outgoing_since(self, after_event_id: int, phone: str) -> list[OutgoingEvent]:
-        return [e for e in self.outgoing if e.event_id > after_event_id and e.phone == phone]
-
-
 class FakeUi:
-    def __init__(self, db: FakeDb) -> None:
-        self.db = db
-        self.sent: list[tuple[str, str]] = []
-        self.opened: str | None = None
-        self.verify_ok = True
-        self.deliver = True  # whether a paste results in an outgoing event
+    """Scriptable UI. `calls` records the order of actions; `on_viber` lists numbers that exist."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self.on_viber = {"+380671234567"}
+        self.open_chat_phone: str | None = None
+        self.header_override: str | None = None  # what peer_phone() reads instead of the real chat
+        self.neutral_error: Exception | None = None
+        self.paste_ok = True
+        self.enter_ok = True
+        self.chat_opens = True
         self.screenshots: list[str] = []
+        self.pasted: list[tuple[str | None, str]] = []
 
-    async def open_chat(self, phone: str) -> None:
-        self.opened = phone
+    async def prepare(self) -> None:
+        self.calls.append("prepare")
 
-    async def verify_target(self, phone: str) -> None:
-        if not self.verify_ok:
-            raise TargetNotVerified("nope")
+    async def neutral(self) -> None:
+        self.calls.append("neutral")
+        if self.neutral_error:
+            raise self.neutral_error
+        self.open_chat_phone = NEUTRAL
 
-    async def paste_and_send(self, text: str) -> None:
-        assert self.opened is not None
-        self.sent.append((self.opened, text))
-        if self.deliver:
-            self.db.latest += 1
-            self.db.outgoing.append(OutgoingEvent(self.db.latest, f"ext{self.db.latest}", self.opened))
+    async def open_chat(self, phone: str) -> ChatOpen:
+        self.calls.append(f"open:{phone}")
+        if not self.chat_opens:
+            return ChatOpen.TIMEOUT
+        self.open_chat_phone = phone
+        return ChatOpen.OPEN if phone in self.on_viber else ChatOpen.NOT_ON_VIBER
+
+    async def wait_chat_open(self) -> bool:
+        self.calls.append("wait_chat_open")
+        return self.chat_opens
+
+    async def peer_phone(self) -> str | None:
+        self.calls.append("peer_phone")
+        if self.header_override is not None:
+            return self.header_override or None
+        return self.open_chat_phone
+
+    async def paste(self, text: str) -> bool:
+        self.calls.append("paste")
+        self.pasted.append((self.open_chat_phone, text))
+        return self.paste_ok
+
+    async def clear_composer(self) -> None:
+        self.calls.append("clear")
+
+    async def press_enter(self) -> bool:
+        self.calls.append("enter")
+        return self.enter_ok
 
     async def screenshot(self, name: str) -> Path | None:
         self.screenshots.append(name)
@@ -90,18 +99,8 @@ class FakeUi:
 
 
 @pytest.fixture
-def fake_db() -> FakeDb:
-    return FakeDb()
+def fake_ui() -> FakeUi:
+    return FakeUi()
 
 
-@pytest.fixture
-def fake_ui(fake_db: FakeDb) -> FakeUi:
-    return FakeUi(fake_db)
-
-
-def incoming(event_id: int, phone: str = "+380671234567") -> IncomingEvent:
-    return IncomingEvent(
-        event_id=event_id, external_id=f"in{event_id}", phone=phone, name="Client",
-        text="Привіт", timestamp=datetime(2026, 10, 19, tzinfo=timezone.utc),
-    )
-
+__all__ = ["FakeUi", "NEUTRAL", "SECRET", "UiError"]

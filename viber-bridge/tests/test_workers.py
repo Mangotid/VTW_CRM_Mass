@@ -7,24 +7,26 @@ from fastapi.testclient import TestClient
 
 from bridge_core.api import create_app
 from bridge_core.store import EnqueueResult
-from bridge_core.workers import Wake, local_today
+from bridge_core.workers import local_today
 
 from app.main import ViberBridge
-from app.viber_db import OutgoingEvent, SchemaNotReady
-from app.workers import Watcher
-from tests.conftest import SECRET, incoming
+from app.notify import Notification
+from app.viber_ui import _same_text, parse_phone
+from app.workers import incoming_text
+from tests.conftest import NEUTRAL, SECRET, UiError
 
 H = {"X-Bridge-Secret": SECRET}
+PHONE = "+380671234567"
 
 
-def _enqueue(store, settings, message_id=1, phone="+380671234567"):
+def _enqueue(store, settings, message_id=1, phone=PHONE):
     res, _ = store.enqueue_outgoing(message_id, phone, "текст", local_today(settings), 100, 100)
     assert res == EnqueueResult.CREATED
     return store.next_queued()
 
 
-def _process(settings, store, ui, db, row):
-    bridge = ViberBridge(settings, store, ui, db)
+def _process(settings, store, ui, row):
+    bridge = ViberBridge(settings, store, ui)
     asyncio.run(bridge.handle_outgoing(row, local_today(settings)))
     return bridge
 
@@ -37,91 +39,156 @@ def _drain(store):
     return out
 
 
-def test_send_success(settings, store, fake_ui, fake_db):
-    row = _enqueue(store, settings)
-    _process(settings, store, fake_ui, fake_db, row)
-    assert fake_ui.sent == [("+380671234567", "текст")]
+# -- sending ---------------------------------------------------------------------
+
+def test_send_success_order(settings, store, fake_ui):
+    _process(settings, store, fake_ui, _enqueue(store, settings))
+    assert fake_ui.calls == ["prepare", "neutral", f"open:{PHONE}", "peer_phone", "paste", "enter", "neutral"]
+    assert fake_ui.pasted == [(PHONE, "текст")]
     final = store.get_outgoing(1)
-    assert final.state == "sent" and final.text is None and final.external_id == "ext101"
-    assert _drain(store) == [{"message_id": 1, "state": "sent", "error": None, "external_id": "ext101"}]
+    assert final.state == "sent" and final.text is None
+    assert _drain(store) == [{"message_id": 1, "state": "sent", "error": None, "external_id": "viber:1"}]
     assert store.usage(local_today(settings)) == (1, 1)
 
 
-def test_send_retry_once_then_error(settings, store, fake_ui, fake_db):
-    fake_ui.deliver = False
-    row = _enqueue(store, settings)
-    _process(settings, store, fake_ui, fake_db, row)
-    assert len(fake_ui.sent) == 2
+def test_not_on_viber_is_not_found_without_paste(settings, store, fake_ui):
+    fake_ui.on_viber = set()
+    _process(settings, store, fake_ui, _enqueue(store, settings))
+    assert "paste" not in fake_ui.calls
+    assert store.get_outgoing(1).state == "not_found"
+    assert _drain(store)[0]["state"] == "not_found"
+
+
+def test_wrong_header_number_never_pastes(settings, store, fake_ui):
+    fake_ui.header_override = "+380999999999"
+    _process(settings, store, fake_ui, _enqueue(store, settings))
+    assert fake_ui.pasted == []
+    assert fake_ui.calls.count(f"open:{PHONE}") == 2  # retried once: nothing was pasted
     assert fake_ui.screenshots == ["msg1_try1", "msg1_try2"]
     final = store.get_outgoing(1)
-    assert final.state == "error" and final.attempts == 2 and final.text is None
+    assert final.state == "error" and "target not verified" in final.error
     assert store.usage(local_today(settings)) == (1, 1)  # counted once per message
-    assert _drain(store)[0]["state"] == "error"
 
 
-def test_target_not_verified_never_pastes(settings, store, fake_ui, fake_db):
-    fake_ui.verify_ok = False
-    row = _enqueue(store, settings)
-    _process(settings, store, fake_ui, fake_db, row)
-    assert fake_ui.sent == []
+def test_unreadable_header_never_pastes(settings, store, fake_ui):
+    fake_ui.header_override = ""  # OCR found no number
+    _process(settings, store, fake_ui, _enqueue(store, settings))
+    assert fake_ui.pasted == [] and store.get_outgoing(1).state == "error"
+
+
+def test_neutral_failure_retries_then_errors_without_open(settings, store, fake_ui):
+    fake_ui.neutral_error = UiError("neutral state not reached")
+    _process(settings, store, fake_ui, _enqueue(store, settings))
+    assert not any(c.startswith("open:") for c in fake_ui.calls)
+    assert "paste" not in fake_ui.calls
     assert store.get_outgoing(1).state == "error"
 
 
-def test_late_confirmation_not_resent(settings, store, fake_ui, fake_db):
-    row = _enqueue(store, settings)
-
-    async def paste_without_event(text: str) -> None:
-        fake_ui.sent.append((fake_ui.opened, text))
-
-    fake_ui.paste_and_send = paste_without_event
-    bridge = ViberBridge(settings, store, fake_ui, fake_db)
-    orig = bridge.viber_sender._wait_confirmation
-
-    async def wait_then_land(baseline, phone):
-        res = await orig(baseline, phone)
-        fake_db.outgoing.append(OutgoingEvent(fake_db.latest + 1, "late", phone))
-        return res
-
-    bridge.viber_sender._wait_confirmation = wait_then_land
-    asyncio.run(bridge.handle_outgoing(row, local_today(settings)))
-    assert len(fake_ui.sent) == 1
-    assert store.get_outgoing(1).state == "sent"
-
-
-def test_schema_not_ready_does_not_touch_ui_or_limits(settings, store, fake_ui, fake_db):
-    def boom():
-        raise SchemaNotReady("pending")
-
-    fake_db.latest_event_id = boom
-    row = _enqueue(store, settings)
-    _process(settings, store, fake_ui, fake_db, row)
-    assert fake_ui.opened is None and fake_ui.sent == []
+def test_paste_mismatch_clears_and_does_not_send_or_retry(settings, store, fake_ui):
+    fake_ui.paste_ok = False
+    _process(settings, store, fake_ui, _enqueue(store, settings))
+    assert "enter" not in fake_ui.calls
+    assert fake_ui.calls.count("paste") == 1 and "clear" in fake_ui.calls
     assert store.get_outgoing(1).state == "error"
-    assert store.usage(local_today(settings)) == (0, 0)
 
 
-def test_watcher_cursor_and_dedup(settings, store, fake_db):
-    w = Watcher(settings, store, fake_db, Wake())
-    fake_db.incoming = [incoming(50)]  # history before first start
-    assert w.poll_once() == 0
-    fake_db.incoming = [incoming(50), incoming(101), incoming(102)]
-    assert w.poll_once() == 2
-    assert w.poll_once() == 0
-    store.kv_set(Watcher.CURSOR_KEY, "100")  # replay
-    assert w.poll_once() == 0
-    assert [p["external_id"] for p in _drain(store)] == ["in101", "in102"]
+def test_enter_unconfirmed_is_error_without_resend(settings, store, fake_ui):
+    fake_ui.enter_ok = False
+    _process(settings, store, fake_ui, _enqueue(store, settings))
+    assert fake_ui.calls.count("paste") == 1 and fake_ui.calls.count("enter") == 1
+    final = store.get_outgoing(1)
+    assert final.state == "error" and "delivery unknown" in final.error
+    assert fake_ui.calls[-1] == "neutral"
 
 
-def test_health_and_logged_out(settings, store, fake_ui, fake_db):
-    bridge = ViberBridge(settings, store, fake_ui, fake_db)
+# -- incoming ----------------------------------------------------------------------
+
+def _notification(nid=1, app="ViberPC", summary="Олег", body="Добрий день"):
+    return Notification(nid, app, summary, body, ("default", "Open"), 1_760_000_000.0)
+
+
+def test_incoming_resolved_and_queued(settings, store, fake_ui):
+    bridge = ViberBridge(settings, store, fake_ui)
+    clicks = []
+    bridge.resolver.click = clicks.append
+    fake_ui.open_chat_phone = PHONE  # the clicked notification opens the sender's chat
+    assert asyncio.run(bridge.resolver.handle(_notification(7))) is True
+    assert clicks == [7]
+    assert fake_ui.calls == ["prepare", "wait_chat_open", "prepare", "peer_phone", "neutral"]
+    [payload] = _drain(store)
+    assert payload["phone"] == PHONE and payload["name"] == "Олег" and payload["text"] == "Добрий день"
+    assert payload["external_id"].startswith("vn:") and payload["attachments"] == []
+
+
+def test_incoming_without_number_is_not_forwarded(settings, store, fake_ui):
+    bridge = ViberBridge(settings, store, fake_ui)
+    bridge.resolver.click = lambda nid: None
+    fake_ui.header_override = ""  # group chat / hidden number
+    assert asyncio.run(bridge.resolver.handle(_notification())) is False
+    assert _drain(store) == [] and bridge.resolver.unresolved == 1
+    assert fake_ui.calls[-1] == "neutral"
+
+
+def test_incoming_chat_not_opened_still_returns_to_neutral(settings, store, fake_ui):
+    bridge = ViberBridge(settings, store, fake_ui)
+    bridge.resolver.click = lambda nid: None
+    fake_ui.chat_opens = False
+    assert asyncio.run(bridge.resolver.handle(_notification())) is False
+    assert "peer_phone" not in fake_ui.calls and fake_ui.calls[-1] == "neutral"
+
+
+def test_only_viber_notifications_are_taken(settings, store, fake_ui):
+    bridge = ViberBridge(settings, store, fake_ui)
+    bridge.resolver.submit(_notification(app="other"))
+    bridge.resolver.submit(_notification(app="ViberPC"))
+    assert bridge.resolver.queue.qsize() == 1
+
+
+def test_incoming_text_media_labels():
+    assert incoming_text("Photo message") == "[вкладення: фото]"
+    assert incoming_text("Sticker") == "[вкладення: стікер]"
+    assert incoming_text("Photo of the sofa, please") == "Photo of the sofa, please"
+
+
+# -- parsing -----------------------------------------------------------------------
+
+def test_parse_phone():
+    assert parse_phone("+380637631837\n") == "+380637631837"
+    assert parse_phone("+3 8 0 6 3 7 6 3 1 8 3 7") == "+380637631837"
+    assert parse_phone(NEUTRAL) == NEUTRAL
+    assert parse_phone("12") is None  # e.g. "12 participants" of a group
+    assert parse_phone("") is None
+
+
+def test_same_text_normalises_line_endings_and_trailing_space():
+    assert _same_text("Привіт \r\nсвіт\n", "Привіт\nсвіт")
+    assert not _same_text("Привіт", "Привіт світ")
+
+
+# -- API / health ------------------------------------------------------------------
+
+def test_health_and_logged_out(settings, store, fake_ui):
+    bridge = ViberBridge(settings, store, fake_ui)
+    profile = settings.viber_home / "380671234567"
+    profile.mkdir(parents=True)
+    (profile / "viber.db").write_bytes(b"encrypted")
     with TestClient(create_app(bridge=bridge, start_workers=False)) as c:
-        bridge.watcher.state = "ok"
         body = c.get("/health", headers=H).json()
         assert body["status"] == "connected" and body["details"]["viber_running"] is True
-        bridge.watcher.state = "schema_pending"
-        body = c.get("/health", headers=H).json()
-        assert body["status"] == "degraded" and "watcher_schema_pending" in body["reasons"]
-        fake_db.found = False
+        (profile / "viber.db").unlink()
         assert c.get("/health", headers=H).json()["status"] == "logged_out"
-        r = c.post("/send", json={"message_id": 1, "phone": "+380671234567", "text": "x"}, headers=H)
+        r = c.post("/send", json={"message_id": 1, "phone": PHONE, "text": "x"}, headers=H)
         assert r.status_code == 503 and r.json()["detail"] == "viber_logged_out"
+
+
+def test_notify_server_down_degrades(settings, store, fake_ui):
+    class DeadNotify:
+        owned = False
+
+    bridge = ViberBridge(settings, store, fake_ui, notify_factory=lambda cb: DeadNotify())
+    bridge.notify = DeadNotify()
+    (settings.viber_home / "1").mkdir(parents=True)
+    (settings.viber_home / "1" / "viber.db").write_bytes(b"x")
+    with TestClient(create_app(bridge=bridge, start_workers=False)) as c:
+        body = c.get("/health", headers=H).json()
+        assert body["status"] == "degraded" and "notify_server_down" in body["reasons"]

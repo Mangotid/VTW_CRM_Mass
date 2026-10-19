@@ -2,69 +2,88 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable
 
 from bridge_core.api import BridgeBase, ChannelHealth, create_app
 from bridge_core.store import OutboxRow, Store
 
 from .config import Settings
-from .viber_db import SchemaPendingViberDb, ViberDb
+from .viber_db import find_viber_db
 from .viber_ui import ViberUiDriver, X11ViberUi
-from .workers import ViberSender, Watcher, debug_cleanup_loop
+from .workers import IncomingResolver, ViberSender, debug_cleanup_loop
 
 
 class ViberBridge(BridgeBase):
     settings: Settings
 
-    def __init__(self, settings: Settings, store: Store, ui: ViberUiDriver, db: ViberDb) -> None:
+    def __init__(self, settings: Settings, store: Store, ui: ViberUiDriver, notify_factory: Any = None) -> None:
         super().__init__(settings, store)
         self.ui = ui
-        self.db = db
-        self.viber_sender = ViberSender(settings, store, ui, db, self.sent, self.failed)
-        self.watcher = Watcher(settings, store, db, self.delivery_wake)
+        self.ui_lock = asyncio.Lock()
+        self.notify_factory = notify_factory  # NotificationServer in production, None in tests
+        self.notify: Any = None
+        self.viber_sender = ViberSender(settings, store, ui, self.ui_lock, self.sent, self.failed)
+        self.resolver = IncomingResolver(settings, store, ui, self.ui_lock, self._click, self.delivery_wake)
+
+    def _click(self, notification_id: int) -> None:
+        if self.notify is not None:
+            self.notify.click(notification_id)
+
+    async def startup(self) -> None:
+        if self.notify_factory is None:
+            return
+        loop = asyncio.get_running_loop()
+        self.notify = self.notify_factory(lambda n: loop.call_soon_threadsafe(self.resolver.submit, n))
+        await asyncio.to_thread(self.notify.start)
+
+    async def shutdown(self) -> None:
+        if self.notify is not None:
+            self.notify.stop()
 
     async def handle_outgoing(self, row: OutboxRow, today: date) -> None:
         await self.viber_sender.process(row, today)
 
+    def logged_in(self) -> bool:
+        return find_viber_db(self.settings.viber_home, self.settings.viber_account) is not None
+
     def send_unavailable(self) -> str | None:
-        return "viber_logged_out" if self.db.locate() is None else None
+        return None if self.logged_in() else "viber_logged_out"
 
     def extra_tasks(self) -> dict[str, Callable[[], Awaitable[None]]]:
-        return {"watcher": self.watcher.run, "debug_cleanup": lambda: debug_cleanup_loop(self.settings)}
+        return {"incoming": self.resolver.run, "debug_cleanup": lambda: debug_cleanup_loop(self.settings)}
 
     def channel_health(self) -> ChannelHealth:
-        db_path = self.db.locate()
         running = self.ui.viber_running()
+        notify_ok = self.notify is not None and self.notify.owned
         reasons = []
         if not running:
             reasons.append("viber_not_running")
-        if db_path is None:
-            reasons.append("viber_db_not_found")
-        if self.watcher.state != "ok":
-            reasons.append(f"watcher_{self.watcher.state}")
-        last = None
-        if db_path is not None:
-            try:
-                last = db_path.stat().st_mtime
-            except OSError:
-                pass
+        if self.notify_factory is not None and not notify_ok:
+            reasons.append("notify_server_down")
         return ChannelHealth(
-            logged_in=db_path is not None,
+            logged_in=self.logged_in(),
             reasons=reasons,
-            details={"viber_running": running, "viber_db_found": db_path is not None, "watcher": self.watcher.state},
-            last_activity=last,
+            details={
+                "viber_running": running,
+                "notify_server": notify_ok,
+                "incoming_pending": self.resolver.queue.qsize(),
+                "incoming_unresolved": self.resolver.unresolved,
+            },
+            last_activity=self.resolver.last_event,
         )
 
 
 def build() -> ViberBridge:
+    from .notify import NotificationServer  # needs gi; not imported by tests
+
     s = Settings.from_env()
-    return ViberBridge(
-        s,
-        Store(s.state_db_path),
-        X11ViberUi(s.display, s.viber_open_cmd, s.viber_window_class, s.ui_step_delay, s.debug_dir),
-        SchemaPendingViberDb(s.viber_home, s.viber_account),
+    ui = X11ViberUi(
+        s.display, s.viber_open_cmd, s.viber_window_class, s.ui_timeout, s.hover_delay,
+        s.paste_check, s.neutral_phone, s.debug_dir,
     )
+    return ViberBridge(s, Store(s.state_db_path), ui, notify_factory=NotificationServer)
 
 
 app = create_app(factory=build, title="PDM Viber bridge")
