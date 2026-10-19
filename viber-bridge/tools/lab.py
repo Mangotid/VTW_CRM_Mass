@@ -126,9 +126,63 @@ def cmd_window(args: argparse.Namespace) -> None:
             subprocess.run(["xdotool", "windowminimize", wid], check=True)
         elif args.action == "activate":
             subprocess.run(["xdotool", "windowactivate", "--sync", wid], check=False)
+        elif args.action == "maximize":
+            subprocess.run(["xdotool", "windowactivate", "--sync", wid], check=False)
+            subprocess.run(["xdotool", "windowmove", wid, "0", "0", "windowsize", wid, "100%", "100%"], check=False)
     time.sleep(1)
     active = subprocess.run(["xdotool", "getactivewindow"], capture_output=True, text=True).stdout.strip()
     print(f"{args.action}: windows={ids} active_now={active or None}")
+
+
+def chat_pane() -> tuple[int, int, int, int]:
+    for node, _, _ in iter_nodes(viber_app()):
+        if node.get_role_name() == "layered pane" and "showing" in states(node) and (ext := extents(node)):
+            return ext
+    sys.exit("chat pane not found")
+
+
+def cmd_info_panel(args: argparse.Namespace) -> None:
+    """Press the rightmost header button (the (i) chat info) via AT-SPI and OCR the side panel."""
+    px, py, pw, ph = chat_pane()
+    header_buttons = []
+    for node, _, path in iter_nodes(viber_app()):
+        ext = extents(node)
+        if node.get_role_name() == "push button" and "showing" in states(node) and ext \
+                and py <= ext[1] < py + 72 and ext[0] > px + pw - 200:
+            header_buttons.append((ext[0], path, node))
+    if not header_buttons:
+        sys.exit("no header buttons found")
+    x, path, node = max(header_buttons, key=lambda b: b[0])
+    if not args.no_press:
+        Atspi.Action.do_action(node.get_action_iface(), 0)
+        time.sleep(args.wait)
+        px, py, pw, ph = chat_pane()
+    print(f"pressed {path} @x={x}; pane now {px},{py} {pw}x{ph}")
+    full = screenshot("info_full")
+    target = OUT / "info_panel.png"
+    subprocess.run(["convert", str(full), "-crop", f"{args.width}x{ph}+{px + pw - args.width}+{py}", "+repage",
+                    "-resize", "200%", str(target)], check=True)
+    full.unlink(missing_ok=True)
+    for line in ocr(target, 6).splitlines():
+        if line.strip():
+            print("ocr:", shape(line.strip(), REVEAL))
+
+
+def cmd_hover(args: argparse.Namespace) -> None:
+    """Move the mouse (no click) and OCR the area around it, e.g. a tooltip."""
+    subprocess.run(["xdotool", "mousemove", str(args.x), str(args.y)], check=True)
+    time.sleep(args.wait)
+    x, y, w, h = (int(v) for v in args.crop.split(","))
+    full = screenshot("hover_full")
+    target = OUT / f"{args.name}.png"
+    subprocess.run(["convert", str(full), "-crop", f"{w}x{h}+{x}+{y}", "+repage", "-resize", "200%", str(target)],
+                   check=True)
+    full.unlink(missing_ok=True)
+    for line in ocr(target, args.psm, args.digits).splitlines():
+        if line.strip():
+            print("ocr:", shape(line.strip(), REVEAL))
+    if args.away:
+        subprocess.run(["xdotool", "mousemove", "1270", "790"], check=False)
 
 
 def cmd_viber_restart(args: argparse.Namespace) -> None:
@@ -154,9 +208,11 @@ def screenshot(name: str) -> Path:
     return path
 
 
-def ocr(path: Path, psm: int) -> str:
-    res = subprocess.run(["tesseract", str(path), "stdout", "-l", "ukr+eng", "--psm", str(psm)],
-                         check=True, capture_output=True, text=True)
+def ocr(path: Path, psm: int, digits: bool = False) -> str:
+    cmd = ["tesseract", str(path), "stdout", "--psm", str(psm)]
+    # Phone numbers are drawn with wide letter spacing: restrict to digits or they read as Cyrillic.
+    cmd += ["-l", "eng", "-c", "tessedit_char_whitelist=+0123456789"] if digits else ["-l", "ukr+eng"]
+    res = subprocess.run(cmd, check=True, capture_output=True, text=True)
     return res.stdout
 
 
@@ -209,12 +265,32 @@ def cmd_notify_listen(args: argparse.Namespace) -> None:
                   f"body={shape(body, REVEAL)} actions={actions[::2]} hints={sorted(hints)} timeout={timeout}",
                   flush=True)
             invocation.return_value(GLib.Variant("(u)", (counter[0],)))
+            if args.click and "default" in actions[::2]:
+                GLib.timeout_add(1000, click, conn, counter[0])
         elif method == "GetCapabilities":
             invocation.return_value(GLib.Variant("(as)", (["body", "actions", "persistence"],)))
         elif method == "GetServerInformation":
             invocation.return_value(GLib.Variant("(ssss)", ("pdm-lab", "pdm", "0.1", "1.2")))
         else:
             invocation.return_value(None)
+
+    def click(conn, notif_id: int) -> bool:  # noqa: ANN001
+        """Emulate a click on the notification, then read who the opened chat belongs to."""
+        conn.emit_signal(None, "/org/freedesktop/Notifications", "org.freedesktop.Notifications",
+                         "ActionInvoked", GLib.Variant("(us)", (notif_id, "default")))
+        time.sleep(2.5)
+        print(f"clicked #{notif_id}; composer fields: {len(composer_state()['editable_showing'])}", flush=True)
+        for name, crop in (("header", "300,62,790,72"), ("banner", "300,134,980,32")):
+            full = screenshot(f"n{notif_id}_full")
+            target = OUT / f"n{notif_id}_{name}.png"
+            x, y, w, h = crop.split(",")
+            subprocess.run(["convert", str(full), "-crop", f"{w}x{h}+{x}+{y}", "+repage", "-resize", "200%",
+                            str(target)], check=True)
+            full.unlink(missing_ok=True)
+            for line in ocr(target, 6).splitlines():
+                if line.strip():
+                    print(f"  {name} ocr: {shape(line.strip(), REVEAL)}", flush=True)
+        return False  # one-shot timer
 
     def on_bus(conn, name):  # noqa: ANN001
         conn.register_object("/org/freedesktop/Notifications", info, on_call, None, None)
@@ -226,8 +302,9 @@ def cmd_notify_listen(args: argparse.Namespace) -> None:
         print("could not own org.freedesktop.Notifications (another server running?)", flush=True)
         loop.quit()
 
-    Gio.bus_own_name(Gio.BusType.SESSION, "org.freedesktop.Notifications",
-                     Gio.BusNameOwnerFlags.REPLACE, on_bus, on_acquired, on_lost)
+    # A killed `docker exec` client leaves the listener running in the container: let the next one replace it.
+    flags = Gio.BusNameOwnerFlags.REPLACE | Gio.BusNameOwnerFlags.ALLOW_REPLACEMENT
+    Gio.bus_own_name(Gio.BusType.SESSION, "org.freedesktop.Notifications", flags, on_bus, on_acquired, on_lost)
     GLib.timeout_add_seconds(args.seconds, loop.quit)
     loop.run()
     print(f"done, {counter[0]} notification(s)")
@@ -251,9 +328,26 @@ def main() -> int:
     p.set_defaults(fn=cmd_key)
 
     p = sub.add_parser("window", help="list / minimize / activate the Viber window")
-    p.add_argument("action", choices=["list", "minimize", "activate"])
+    p.add_argument("action", choices=["list", "minimize", "activate", "maximize"])
     p.add_argument("--wm-class", default="ViberPC")
     p.set_defaults(fn=cmd_window)
+
+    p = sub.add_parser("info-panel", help="press the (i) header button and OCR the chat info panel")
+    p.add_argument("--wait", type=float, default=2)
+    p.add_argument("--width", type=int, default=300)
+    p.add_argument("--no-press", action="store_true", help="only OCR (panel already open)")
+    p.set_defaults(fn=cmd_info_panel)
+
+    p = sub.add_parser("hover", help="move the mouse to x,y (no click) and OCR a crop, e.g. a tooltip")
+    p.add_argument("x", type=int)
+    p.add_argument("y", type=int)
+    p.add_argument("--crop", default="300,40,600,140")
+    p.add_argument("--name", default="hover")
+    p.add_argument("--wait", type=float, default=2)
+    p.add_argument("--away", action="store_true", help="move the mouse away afterwards")
+    p.add_argument("--psm", type=int, default=6)
+    p.add_argument("--digits", action="store_true", help="OCR digits and + only (phone numbers)")
+    p.set_defaults(fn=cmd_hover)
 
     p = sub.add_parser("viber-restart", help="restart the Viber process via supervisorctl")
     p.set_defaults(fn=cmd_viber_restart)
@@ -274,7 +368,12 @@ def main() -> int:
 
     p = sub.add_parser("notify-listen", help="be the notification server for N seconds")
     p.add_argument("--seconds", type=int, default=120)
+    p.add_argument("--click", action="store_true", help="click each notification and OCR the opened chat header")
     p.set_defaults(fn=cmd_notify_listen)
+
+    p = sub.add_parser("stop-listeners", help="stop notify-listen processes left in the container")
+    p.set_defaults(fn=lambda a: print("stopped" if subprocess.run(
+        ["pkill", "-f", "lab.py notify-listen"]).returncode == 0 else "none running"))
 
     args = ap.parse_args()
     args.fn(args)
