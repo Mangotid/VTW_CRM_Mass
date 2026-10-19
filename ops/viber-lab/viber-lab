@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# viber-lab: run the phase-2 research tool (viber-bridge/tools/lab.py) inside the Viber
+# container as user "viber". Lets Claude Code (pdm_mess, not in group docker) run UI
+# experiments without any other Docker access. See ops/viber-lab/README.md.
+#
+# Root is used only for `docker exec` with fixed arguments; files are read and written
+# as $LAB_USER (runuser), so the caller cannot make root read or overwrite other files.
+set -euo pipefail
+
+LAB_USER=pdm_mess
+CONTAINER=pdm-viber-viber-bridge-1
+SRC=/home/$LAB_USER/VTW_CRM_Mass/viber-bridge/tools
+OUT=/home/$LAB_USER/viber-lab-out
+REVEAL_FILE=/etc/viber-lab.reveal   # owner's test number tail; kept out of the public repo
+
+[[ $EUID -eq 0 ]] || { echo "run via: sudo viber-lab <command>" >&2; exit 1; }
+reveal=$(tr -cd '0-9' <"$REVEAL_FILE" 2>/dev/null || true)
+[[ ${#reveal} -ge 4 ]] || { echo "$REVEAL_FILE must hold at least 4 digits" >&2; exit 1; }
+
+in_ct() { docker exec -u viber "$CONTAINER" "$@"; }
+
+in_ct sh -c 'rm -rf /tmp/lab /tmp/lab-out && mkdir -p /tmp/lab'
+runuser -u "$LAB_USER" -- tar -C "$SRC" --exclude=__pycache__ -cf - . \
+  | docker exec -i -u viber "$CONTAINER" tar -C /tmp/lab -xf -
+
+rc=0
+docker exec -u viber -e LAB_REVEAL="$reveal" "$CONTAINER" python3 /tmp/lab/lab.py "$@" || rc=$?
+
+if in_ct test -d /tmp/lab-out; then
+  runuser -u "$LAB_USER" -- mkdir -p "$OUT"
+  in_ct tar -C /tmp/lab-out -cf - . | runuser -u "$LAB_USER" -- tar -C "$OUT" -xf -
+  in_ct rm -rf /tmp/lab-out
+  echo "files: $OUT"
+fi
+exit "$rc"

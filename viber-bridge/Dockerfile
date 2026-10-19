@@ -24,6 +24,7 @@ RUN apt-get update \
       xclip xdotool xdg-utils x11-utils imagemagick dbus-x11 \
       python3 python3-venv sqlite3 dbus-bin \
       at-spi2-core gir1.2-atspi-2.0 python3-gi \
+      tesseract-ocr tesseract-ocr-ukr tesseract-ocr-eng \
       fonts-dejavu-core fonts-noto-color-emoji \
  && rm -rf /var/lib/apt/lists/* \
  && install -d -m 1777 /tmp/.X11-unix
