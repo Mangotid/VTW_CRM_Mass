@@ -20,7 +20,7 @@ class MyBridge(BridgeBase):
         ...
     def channel_health(self) -> ChannelHealth: ...  # logged_in, reasons, details, last_activity
     def send_unavailable(self) -> str | None: ...   # 503 для /send, якщо канал не готовий
-    def extra_tasks(self): return [...]             # watcher-и вхідних тощо
+    def extra_tasks(self): return {"watcher": self.watcher.run}  # ім'я → фабрика циклу; після падіння перезапускається
     async def startup(self) / shutdown(self): ...
 
 app = create_app(factory=build, title="PDM ... bridge")

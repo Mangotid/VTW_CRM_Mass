@@ -108,3 +108,64 @@ def test_delivery_fifo_and_retry(settings, store):
     assert [c[1]["external_id"] for c in calls] == ["a", "a", "b"]
     assert calls[0][0] == "/messenger/bridge/test/incoming"
     assert all(c[2] == SECRET for c in calls)
+
+
+def test_backoff_capped_without_overflow():
+    from bridge_core.workers import backoff
+
+    assert backoff(5.0, 300.0, 0) == 5.0
+    assert backoff(60.0, 3600.0, 2) == 240.0
+    assert backoff(60.0, 3600.0, 5000) == 3600.0  # 2 ** 5000 would overflow a float
+
+
+def test_delivery_after_many_failed_attempts(settings, store):
+    store.enqueue_incoming({"external_id": "a", "phone": "+380671234567", "text": "x"})
+    with store._tx() as db:
+        db.execute("UPDATE callbacks SET attempts=2000")
+
+    async def scenario():
+        transport = httpx.MockTransport(lambda request: httpx.Response(404))
+        async with httpx.AsyncClient(transport=transport) as client:
+            assert await OdooDelivery(settings, store, Wake(), client).deliver_once(client) is False
+
+    asyncio.run(scenario())
+    assert store.next_callback(time.time() + 3601) is not None
+
+
+def test_supervise_restarts_crashed_loop():
+    from bridge_core.workers import supervise
+
+    runs = []
+
+    async def flaky():
+        runs.append(1)
+        if len(runs) < 3:
+            raise RuntimeError("boom")
+        await asyncio.sleep(3600)
+
+    async def scenario():
+        task = asyncio.create_task(supervise("flaky", flaky, restart_delay=0))
+        for _ in range(100):
+            if len(runs) >= 3:
+                break
+            await asyncio.sleep(0.01)
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(scenario())
+    assert len(runs) == 3
+
+
+def test_wake_set_from_another_thread():
+    import threading
+
+    async def scenario():
+        wake = Wake()
+        waiter = asyncio.create_task(wake.wait(5))
+        await asyncio.sleep(0.01)  # waiter is now blocked inside wait()
+        started = time.monotonic()
+        threading.Thread(target=wake.set).start()
+        await waiter
+        return time.monotonic() - started
+
+    assert asyncio.run(scenario()) < 1.0

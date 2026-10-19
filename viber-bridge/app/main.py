@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Any, Coroutine
+from typing import Awaitable, Callable
 
 from bridge_core.api import BridgeBase, ChannelHealth, create_app
 from bridge_core.store import OutboxRow, Store
@@ -30,8 +30,8 @@ class ViberBridge(BridgeBase):
     def send_unavailable(self) -> str | None:
         return "viber_logged_out" if self.db.locate() is None else None
 
-    def extra_tasks(self) -> list[Coroutine[Any, Any, None]]:
-        return [self.watcher.run(), debug_cleanup_loop(self.settings)]
+    def extra_tasks(self) -> dict[str, Callable[[], Awaitable[None]]]:
+        return {"watcher": self.watcher.run, "debug_cleanup": lambda: debug_cleanup_loop(self.settings)}
 
     def channel_health(self) -> ChannelHealth:
         db_path = self.db.locate()

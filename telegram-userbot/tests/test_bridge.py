@@ -109,15 +109,44 @@ def test_stale_peer_cache_retried_once(settings, store, gw):
     assert gw.sent[0][0] == Peer(42, 777)
 
 
-def test_network_error_retry_once_then_error(settings, store, gw):
-    gw.users[PHONE] = Peer(42, 777)
+def test_network_error_on_resolve_retry_once_then_error(settings, store, gw):
     bridge = TelegramBridge(settings, store, gw)
-    gw.send_error = ConnectionError("down")
+    gw.import_error = ConnectionError("down")
     _run(bridge, _enqueue(store, settings), settings)
     assert store.get_outgoing(1).state == "queued"
-    gw.send_error = ConnectionError("down")
     _run(bridge, store.next_queued(now=time.time() + 60), settings)
     assert store.get_outgoing(1).state == "error"
+    assert gw.sent == []
+
+
+def test_network_error_on_send_is_not_resent(settings, store, gw):
+    # Delivery unknown: a retry would be a new message (new random_id) -> possible duplicate.
+    gw.users[PHONE] = Peer(42, 777)
+    bridge = TelegramBridge(settings, store, gw)
+    gw.send_error = asyncio.TimeoutError()
+    _run(bridge, _enqueue(store, settings), settings)
+    row = store.get_outgoing(1)
+    assert row.state == "error"
+    assert "доставка невідома" in row.error
+    assert store.next_queued(now=time.time() + 1e6) is None
+    assert _statuses(store)[-1]["state"] == "error"
+
+
+def test_monitor_survives_rpc_error(settings, store, gw):
+    class Client:
+        def is_connected(self):
+            return True
+
+        async def is_user_authorized(self):
+            return True
+
+        async def __call__(self, request):
+            raise errors.FloodWaitError(request=None, capture=30)
+
+    bridge = TelegramBridge(settings, store, gw, client=Client())
+    bridge.authorized = True
+    asyncio.run(bridge._check_session(connect=False))
+    assert bridge.authorized is True  # last known state kept, no exception escaped
 
 
 # -- incoming -------------------------------------------------------------

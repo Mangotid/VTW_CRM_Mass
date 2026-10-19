@@ -20,20 +20,48 @@ OutgoingHandler = Callable[[OutboxRow, date], Awaitable[None]]
 
 
 class Wake:
-    """Lets the API nudge a sleeping worker."""
+    """Lets the API nudge a sleeping worker. `set()` is safe from any thread (sync endpoints run in a pool)."""
 
     def __init__(self) -> None:
         self._event = asyncio.Event()
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     def set(self) -> None:
-        self._event.set()
+        loop = self._loop
+        try:
+            current = asyncio.get_running_loop()
+        except RuntimeError:
+            current = None
+        if loop is None or loop is current:
+            self._event.set()
+        elif not loop.is_closed():
+            loop.call_soon_threadsafe(self._event.set)
 
     async def wait(self, timeout: float) -> None:
+        self._loop = asyncio.get_running_loop()
         try:
             await asyncio.wait_for(self._event.wait(), timeout)
         except asyncio.TimeoutError:
             pass
         self._event.clear()
+
+
+def backoff(base: float, cap: float, attempts: int) -> float:
+    # Exponent capped: 2 ** 1024 no longer fits a float (OverflowError after weeks of retries).
+    return min(cap, base * 2 ** min(attempts, 20))
+
+
+async def supervise(name: str, factory: Callable[[], Awaitable[None]], restart_delay: float = 5.0) -> None:
+    """Run a background loop forever: a crash is logged and the loop restarted, never lost silently."""
+    while True:
+        try:
+            await factory()
+            log.error("task_exited", extra={"task": name, "restart_in": restart_delay})
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            log.exception("task_crashed", extra={"task": name, "restart_in": restart_delay})
+        await asyncio.sleep(restart_delay)
 
 
 def local_today(settings: CoreSettings) -> date:
@@ -119,7 +147,7 @@ class OdooDelivery:
         try:
             resp = await client.post(url, json=cb.payload, headers={"X-Bridge-Secret": self.s.bridge_secret})
         except httpx.HTTPError as exc:
-            retry = min(300.0, 5.0 * 2 ** cb.attempts)
+            retry = backoff(5.0, 300.0, cb.attempts)
             self.store.callback_failed(cb.id, f"network: {type(exc).__name__}", retry)
             log.warning("odoo_unreachable", extra={"callback_id": cb.id, "kind": cb.kind, "retry_in": retry})
             return False
@@ -129,7 +157,7 @@ class OdooDelivery:
             return True
         # Never drop data: 4xx usually means config error (secret/route) and needs a human.
         base, cap = (60.0, 3600.0) if 400 <= resp.status_code < 500 else (5.0, 300.0)
-        retry = min(cap, base * 2 ** cb.attempts)
+        retry = backoff(base, cap, cb.attempts)
         self.store.callback_failed(cb.id, f"http {resp.status_code}", retry)
         log.error(
             "odoo_rejected",

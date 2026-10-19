@@ -7,7 +7,7 @@ import json
 import logging
 import time
 from datetime import date
-from typing import Any, Coroutine
+from typing import Any, Awaitable, Callable
 
 from telethon import errors, functions
 
@@ -53,6 +53,7 @@ class TelegramBridge(BridgeBase):
             return
         self.store.mark_sending(mid, today, count=row.attempts == 0)
         log.info("send_attempt", extra={"message_id": mid, "attempt": row.attempts + 1, "phone": mask_phone(row.phone)})
+        stage = "resolve"
         try:
             peer = await self._resolve(row.phone)
             if peer is None:
@@ -61,6 +62,7 @@ class TelegramBridge(BridgeBase):
             if peer == "retry":
                 self._defer(mid, IMPORT_RETRY_DELAY, "contact import rate limited")
                 return
+            stage = "send"
             msg_id = await self.gateway.send_text(peer, row.text)
             self.sent(mid, f"{peer.user_id}:{msg_id}")
             self.last_event = time.time()
@@ -85,7 +87,12 @@ class TelegramBridge(BridgeBase):
             self.authorized = False
             self.failed(mid, "error", f"сесія Telegram недійсна ({type(exc).__name__}), потрібен повторний вхід")
         except (ConnectionError, OSError, asyncio.TimeoutError) as exc:
-            self._retry_or_fail(row, f"network: {type(exc).__name__}")
+            if stage == "send":
+                # The request may have reached Telegram; a resend gets a new random_id and duplicates it.
+                self.failed(mid, "error", f"зв'язок із Telegram обірвався під час відправки ({type(exc).__name__}): "
+                                          "доставка невідома, перевірте чат перед повтором")
+            else:
+                self._retry_or_fail(row, f"network: {type(exc).__name__}")
         except errors.RPCError as exc:
             self.failed(mid, "error", f"telegram: {type(exc).__name__}")
 
@@ -154,8 +161,8 @@ class TelegramBridge(BridgeBase):
             await self.client.disconnect()
             protect_session_file(self.settings.tg)
 
-    def extra_tasks(self) -> list[Coroutine[Any, Any, None]]:
-        return [self._monitor()] if self.client is not None else []
+    def extra_tasks(self) -> dict[str, Callable[[], Awaitable[None]]]:
+        return {"session_monitor": self._monitor} if self.client is not None else {}
 
     async def _monitor(self) -> None:
         while True:
@@ -184,6 +191,9 @@ class TelegramBridge(BridgeBase):
         except (ConnectionError, OSError, asyncio.TimeoutError) as exc:
             self.connected = False
             log.warning("telegram_connect_failed", extra={"error": type(exc).__name__})
+        except errors.RPCError as exc:
+            # e.g. FloodWait on GetState: state unknown for now, keep the last one and check again later.
+            log.warning("telegram_check_failed", extra={"error": type(exc).__name__})
 
     def send_unavailable(self) -> str | None:
         return None if self.authorized else "telegram_logged_out"

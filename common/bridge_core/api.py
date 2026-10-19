@@ -10,7 +10,7 @@ import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
-from typing import Annotated, Any, AsyncIterator, Callable, Coroutine
+from typing import Annotated, Any, AsyncIterator, Awaitable, Callable
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -20,7 +20,7 @@ from .logs import mask_phone, setup_logging
 from .models import DailyUsage, HealthResponse, SendRequest
 from .settings import CoreSettings
 from .store import EnqueueResult, OutboxRow, Store
-from .workers import OdooDelivery, SenderLoop, Wake, local_today
+from .workers import OdooDelivery, SenderLoop, Wake, local_today, supervise
 
 log = logging.getLogger("bridge.api")
 
@@ -59,8 +59,9 @@ class BridgeBase:
         """Return a 503 detail if /send must be refused right now."""
         return None
 
-    def extra_tasks(self) -> list[Coroutine[Any, Any, None]]:
-        return []
+    def extra_tasks(self) -> dict[str, Callable[[], Awaitable[None]]]:
+        """Background loops by name; each factory is called again if its loop crashes."""
+        return {}
 
     async def startup(self) -> None:
         pass
@@ -75,8 +76,8 @@ class BridgeBase:
         if interrupted:
             log.warning("interrupted_messages_marked_error", extra={"message_ids": interrupted})
             self.delivery_wake.set()
-        coros = [self.sender.run(), self.delivery.run(), *self.extra_tasks()]
-        return [asyncio.create_task(c) for c in coros]
+        loops = {"sender": self.sender.run, "odoo_delivery": self.delivery.run, **self.extra_tasks()}
+        return [asyncio.create_task(supervise(name, f), name=name) for name, f in loops.items()]
 
     def sent(self, message_id: int, external_id: str | None) -> None:
         self.store.finish_outgoing(message_id, "sent", external_id=external_id)
