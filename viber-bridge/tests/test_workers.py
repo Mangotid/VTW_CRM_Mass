@@ -92,6 +92,18 @@ def test_paste_mismatch_clears_and_does_not_send_or_retry(settings, store, fake_
     assert store.get_outgoing(1).state == "error"
 
 
+def test_ui_error_after_paste_started_is_final(settings, store, fake_ui):
+    async def broken_paste(text):
+        fake_ui.calls.append("paste")
+        raise UiError("xclip timed out")
+
+    fake_ui.paste = broken_paste
+    _process(settings, store, fake_ui, _enqueue(store, settings))
+    assert fake_ui.calls.count("paste") == 1  # no second attempt: text may already be in the composer
+    final = store.get_outgoing(1)
+    assert final.state == "error" and "delivery unknown" in final.error
+
+
 def test_enter_unconfirmed_is_error_without_resend(settings, store, fake_ui):
     fake_ui.enter_ok = False
     _process(settings, store, fake_ui, _enqueue(store, settings))

@@ -107,12 +107,15 @@ class ViberSender:
         if peer != phone:
             # Never paste unless the open chat is proven to be this number.
             return "retry", f"target not verified (header shows {mask_phone(peer) if peer else 'no number'})"
-        if not await self.ui.paste(text):
-            await self.ui.clear_composer()
-            return "final_error", "pasted text could not be verified in the composer, not sent"
-        if not await self.ui.press_enter():
-            # Enter was pressed: delivery unknown, never resend blindly.
-            return "final_error", "composer not empty after Enter: delivery unknown"
+        # From here on text may be in the composer or already sent: any failure is final, never a retry.
+        try:
+            if not await self.ui.paste(text):
+                await self.ui.clear_composer()
+                return "final_error", "pasted text could not be verified in the composer, not sent"
+            if not await self.ui.press_enter():
+                return "final_error", "composer not empty after Enter: delivery unknown"
+        except UiError as exc:
+            return "final_error", f"ui after paste started: {exc}; delivery unknown"
         return "sent", ""
 
     async def _back_to_neutral(self) -> None:

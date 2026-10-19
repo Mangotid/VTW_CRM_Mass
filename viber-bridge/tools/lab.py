@@ -195,6 +195,21 @@ def cmd_health(args: argparse.Namespace) -> None:
         print(resp.read().decode())
 
 
+def cmd_queue(args: argparse.Namespace) -> None:
+    """Pending Odoo callbacks of the bridge (read-only), values shaped like everything else."""
+    import json
+    import sqlite3
+
+    db = sqlite3.connect("file:/data/bridge.sqlite3?mode=ro", uri=True)
+    rows = db.execute("SELECT id, kind, attempts, last_error, payload FROM callbacks ORDER BY id").fetchall()
+    for cid, kind, attempts, last_error, payload in rows:
+        data = json.loads(payload)
+        shown = {k: (shape(v, REVEAL) if isinstance(v, str) and k not in ("external_id", "state", "error") else v)
+                 for k, v in data.items()}
+        print(f"#{cid} {kind} attempts={attempts} last_error={last_error!r} {shown}")
+    print(f"{len(rows)} pending")
+
+
 def cmd_viber_restart(args: argparse.Namespace) -> None:
     """Restart only the Viber process (e.g. so it sees a notification server at startup)."""
     subprocess.run(["supervisorctl", "-c", "/etc/supervisor/viber-bridge.conf", "restart", "viber"], check=True)
@@ -358,6 +373,9 @@ def main() -> int:
     p.add_argument("--psm", type=int, default=6)
     p.add_argument("--digits", action="store_true", help="OCR digits and + only (phone numbers)")
     p.set_defaults(fn=cmd_hover)
+
+    p = sub.add_parser("queue", help="pending Odoo callbacks (read-only, shaped)")
+    p.set_defaults(fn=cmd_queue)
 
     p = sub.add_parser("health", help="the bridge's /health JSON")
     p.set_defaults(fn=cmd_health)

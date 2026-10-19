@@ -268,15 +268,38 @@ class X11ViberUi:
 
     # -- composer ----------------------------------------------------------------
 
+    async def _set_clipboard(self, data: bytes) -> None:
+        # xclip forks and keeps serving the selection in the background; that child inherits any
+        # stdout/stderr pipe, so waiting for pipe EOF never ends. Discard output, wait for the parent only.
+        proc = await asyncio.create_subprocess_exec(
+            "xclip", "-selection", "clipboard", "-i",
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+            env=self._env,
+        )
+        assert proc.stdin is not None
+        proc.stdin.write(data)
+        await proc.stdin.drain()
+        proc.stdin.close()
+        try:
+            code = await asyncio.wait_for(proc.wait(), 5)
+        except asyncio.TimeoutError:
+            proc.kill()
+            raise UiError("xclip timed out")
+        if code != 0:
+            raise UiError(f"xclip exited {code}")
+
     async def paste(self, text: str) -> bool:
         """Paste into the composer; True only if the composer then holds exactly this text."""
-        await self._run("xclip", "-selection", "clipboard", "-i", stdin=text.encode("utf-8"))
+        await self._set_clipboard(text.encode("utf-8"))
         try:
             await self._run("xdotool", "key", "--clearmodifiers", "ctrl+v")
             await asyncio.sleep(0.5)
         finally:
             # Do not leave customer text in the clipboard.
-            await self._run("xclip", "-selection", "clipboard", "-i", stdin=b"")
+            try:
+                await self._set_clipboard(b"")
+            except UiError as exc:
+                log.warning("clipboard_clear_failed", extra={"error": str(exc)})
         composer = (await self._state())["composer"]
         if composer is None:
             return False
