@@ -37,11 +37,12 @@ for v in EVOLUTION_API_KEY EVOLUTION_DB_PASSWORD WEBHOOK_SECRET BRIDGE_SECRET; d
   sed -i "s/^$v=.*/$v=$(openssl rand -hex 32)/" .env
 done
 docker compose build && docker compose up -d
-docker compose run --rm whatsapp-adapter python login.py     # код прив'язки (8 символів)
+docker compose run --rm whatsapp-adapter python login.py     # QR у терміналі (або --code: 8 символів)
 ```
 
-На телефоні: WhatsApp Business → **Пов'язані пристрої** → **Прив'язати пристрій** → **Прив'язати за номером
-телефону** → ввести код. `login.py` чекає до 3 хв і пише `Linked. State: open.`
+На телефоні: WhatsApp Business → **Пов'язані пристрої** → **Прив'язати пристрій** → відсканувати QR із термінала
+(оновлюється сам). Варіант `--code`: «Прив'язати за номером телефону» → ввести 8 символів (через Baileys спрацьовує
+не завжди). Незавершене підключення (`connecting`) `login.py` спершу скидає. Чекає до 3 хв → `Linked. State: open.`
 
 ## Перевірка
 

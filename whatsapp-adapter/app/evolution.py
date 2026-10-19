@@ -92,6 +92,10 @@ class EvolutionClient:
         params = {"number": number_digits} if number_digits else None
         return await self._req("GET", f"/instance/connect/{self.instance}", params=params)
 
+    async def logout(self) -> None:
+        """Drop a half-done or stale link so the next connect starts clean."""
+        await self._req("DELETE", f"/instance/logout/{self.instance}")
+
     async def number_exists(self, number_digits: str) -> bool:
         data = await self._req("POST", f"/chat/whatsappNumbers/{self.instance}", json={"numbers": [number_digits]})
         first = data[0] if isinstance(data, list) and data else {}
