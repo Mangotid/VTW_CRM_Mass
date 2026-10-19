@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
 
-from app.config import Settings
-from app.store import Store
-from app.viber_db import IncomingEvent, OutgoingEvent
-from app.viber_ui import TargetNotVerified
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "common"))
+
+from bridge_core.store import Store  # noqa: E402
+
+from app.config import Settings  # noqa: E402
+from app.viber_db import IncomingEvent, OutgoingEvent  # noqa: E402
+from app.viber_ui import TargetNotVerified  # noqa: E402
 
 SECRET = "s" * 40
 

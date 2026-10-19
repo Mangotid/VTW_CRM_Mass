@@ -1,4 +1,4 @@
-"""Local state in SQLite (data volume): outbox, Odoo callback queue, dedup, limits.
+"""Bridge-local state in SQLite (data volume): outbox, Odoo callback queue, dedup, limits.
 
 Message text is kept only while it is needed: outbox text is wiped once the
 message reaches a final state, callback payloads are deleted once Odoo accepts them.
@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS outbox (
     is_new_contact INTEGER NOT NULL DEFAULT 0,
     error          TEXT,
     external_id    TEXT,
+    not_before     REAL,                     -- deferred retry (e.g. Telegram FloodWait)
     created_at     REAL NOT NULL,
     updated_at     REAL NOT NULL
 );
@@ -162,9 +163,21 @@ class Store:
             )
         return EnqueueResult.CREATED, None
 
-    def next_queued(self) -> OutboxRow | None:
-        rows = self._q("SELECT * FROM outbox WHERE state='queued' ORDER BY message_id LIMIT 1")
+    def next_queued(self, now: float | None = None) -> OutboxRow | None:
+        rows = self._q(
+            "SELECT * FROM outbox WHERE state='queued' AND COALESCE(not_before, 0) <= ?"
+            " ORDER BY message_id LIMIT 1",
+            (time.time() if now is None else now,),
+        )
         return _outbox(rows[0]) if rows else None
+
+    def defer(self, message_id: int, until: float, error: str) -> None:
+        """Put a message back to the queue, not to be retried before `until`."""
+        with self._tx() as db:
+            db.execute(
+                "UPDATE outbox SET state='queued', not_before=?, error=?, updated_at=? WHERE message_id=?",
+                (until, error[:500], time.time(), message_id),
+            )
 
     def get_outgoing(self, message_id: int) -> OutboxRow | None:
         rows = self._q("SELECT * FROM outbox WHERE message_id=?", (message_id,))
@@ -245,11 +258,12 @@ class Store:
             )
             if cur.rowcount == 0:
                 return False
-            db.execute(
-                "INSERT INTO contacts(phone, last_in_at) VALUES (?,?)"
-                " ON CONFLICT(phone) DO UPDATE SET last_in_at=excluded.last_in_at",
-                (payload["phone"], now),
-            )
+            if payload.get("phone"):
+                db.execute(
+                    "INSERT INTO contacts(phone, last_in_at) VALUES (?,?)"
+                    " ON CONFLICT(phone) DO UPDATE SET last_in_at=excluded.last_in_at",
+                    (payload["phone"], now),
+                )
             db.execute(
                 "INSERT OR IGNORE INTO callbacks(kind, dedup_key, payload, next_attempt_at, created_at)"
                 " VALUES ('incoming', ?, ?, ?, ?)",

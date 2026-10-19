@@ -5,10 +5,11 @@ name: pdm-viber
 services:
   viber-bridge:
     build:
-      context: .
+      context: ..
+      dockerfile: viber-bridge/Dockerfile
       args:
         VIBER_DEB_SHA256: ${VIBER_DEB_SHA256:?set VIBER_DEB_SHA256 in .env}
-    image: pdm/viber-bridge:0.1.0
+    image: pdm/viber-bridge:0.2.0
     env_file: .env
     environment:
       TZ: Europe/Kyiv

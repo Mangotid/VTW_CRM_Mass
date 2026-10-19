@@ -2,6 +2,8 @@
 
 Міст між особистим акаунтом Viber магазину (Viber Desktop у Docker) і Odoo `crm_messenger`.
 Реалізує контракт із `CLAUDE.md`: `POST /send`, `GET /health` → Odoo `/messenger/bridge/viber/{incoming,status}`.
+API, черги, ліміти й доставка в Odoo — спільне ядро `common/bridge_core` (див. `common/README.md`);
+тут лише Viber-специфіка: `app/viber_ui.py`, `app/viber_db.py`, `app/workers.py` (спроба відправки, Watcher).
 
 ## Стан
 
@@ -15,7 +17,7 @@
 | Перевірка, що відкрито чат саме потрібного клієнта | **не реалізовано** — відправка заблокована |
 | Вкладення                                 | не підтримуються (`422 attachments_not_supported`) |
 
-Поки не закриті два пункти «чекає» / «не реалізовано», `VIBER_SEND_ENABLED=false` і `/send` відповідає `503 sending_disabled`.
+Поки не закриті два пункти «чекає» / «не реалізовано», `SEND_ENABLED=false` і `/send` відповідає `503 sending_disabled`.
 
 ### Чому відправка заблокована
 
@@ -66,6 +68,7 @@ viber.db (mode=ro) ─▶ Watcher (за курсором event id) ─▶ callba
 `status`: `logged_out` — немає `viber.db` (акаунт не залогінений); `degraded` — Viber не запущений,
 Watcher не в стані `ok` або доставка в Odoo застрягла довше `CALLBACK_STALE_AFTER`; інакше `connected`.
 `reasons` пояснює причину; `daily_limit_reached` і `sending_disabled` статус не погіршують.
+Viber-специфічні поля — у `details`: `viber_running`, `viber_db_found`, `watcher`.
 
 ## Змінні оточення
 
@@ -112,8 +115,11 @@ curl -s -XPOST -H "$H" -H 'content-type: application/json' \
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install --no-deps -r requirements.lock && .venv/bin/pip install pytest==9.1.1
-.venv/bin/python -m pytest -q
+.venv/bin/python -m pytest -q                       # тести Viber (conftest додає ../common у sys.path)
+(cd ../common && ../viber-bridge/.venv/bin/python -m pytest -q)   # тести ядра
 ```
+
+Образ збирається з кореня репозиторію (`context: ..` у compose), бо копіює `common/bridge_core`.
 
 Залежності: прямі — `requirements.txt`, повний зафіксований набір — `requirements.lock`
 (образ ставить саме його з `--no-deps`). Під час оновлення фіксувати лише релізи, старші за два тижні.

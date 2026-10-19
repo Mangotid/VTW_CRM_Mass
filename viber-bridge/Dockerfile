@@ -1,4 +1,5 @@
 # Viber Desktop (Xvfb + fluxbox + x11vnc + noVNC) + FastAPI bridge.
+# Build context: repository root (see docker-compose.yml).
 FROM ubuntu:noble-20260911
 
 # viber.deb is served from an unversioned URL: the checksum pins the exact build.
@@ -39,14 +40,15 @@ RUN (userdel -r ubuntu 2>/dev/null || true) \
  && chown -R viber:viber /home/viber /data /debug \
  && chmod 700 /home/viber/.ViberPC /data /debug
 
-COPY requirements.lock /opt/bridge/requirements.lock
+COPY viber-bridge/requirements.lock /opt/bridge/requirements.lock
 RUN python3 -m venv /opt/bridge/venv \
  && /opt/bridge/venv/bin/pip install --no-cache-dir --no-deps -r /opt/bridge/requirements.lock \
  && /opt/bridge/venv/bin/pip check
 
-COPY app /opt/bridge/app
-COPY supervisord.conf /etc/supervisor/viber-bridge.conf
-COPY --chmod=755 entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY common/bridge_core /opt/bridge/bridge_core
+COPY viber-bridge/app /opt/bridge/app
+COPY viber-bridge/supervisord.conf /etc/supervisor/viber-bridge.conf
+COPY --chmod=755 viber-bridge/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 USER viber
 WORKDIR /opt/bridge

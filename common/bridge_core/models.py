@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -42,11 +42,14 @@ class SendRequest(BaseModel):
 
 class IncomingPayload(BaseModel):
     external_id: str
-    phone: str
+    # Telegram may not reveal the sender's phone: then phone is null and user_id identifies them.
+    phone: str | None
     name: str | None
     text: str
     attachments: list[Attachment] = Field(default_factory=list)
     timestamp: datetime
+    user_id: str | None = None
+    username: str | None = None
 
 
 class StatusPayload(BaseModel):
@@ -71,7 +74,5 @@ class HealthResponse(BaseModel):
     callbacks_pending: int
     last_activity: datetime | None
     sending_enabled: bool
-    viber_running: bool
-    viber_db_found: bool
-    watcher: str
     daily: DailyUsage
+    details: dict[str, Any] = Field(default_factory=dict)
