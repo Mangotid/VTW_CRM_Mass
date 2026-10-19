@@ -1,0 +1,35 @@
+# Telegram userbot bridge. API is published only on the hub's WireGuard address.
+name: pdm-telegram
+
+services:
+  telegram-userbot:
+    build:
+      context: ..
+      dockerfile: telegram-userbot/Dockerfile
+    image: pdm/telegram-userbot:0.1.0
+    env_file: .env
+    environment:
+      TZ: Europe/Kyiv
+      DATA_DIR: /data
+      TG_SESSION_PATH: /session/userbot
+    ports:
+      - "${WG_BIND_IP:?set WG_BIND_IP in .env}:${TG_BRIDGE_PORT:-8102}:8102"
+    volumes:
+      - tg_session:/session   # Telegram account session (full account access!)
+      - tg_state:/data        # bridge SQLite queues
+    mem_limit: 256m
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  tg_session:
+  tg_state:

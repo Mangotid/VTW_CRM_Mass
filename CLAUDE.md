@@ -51,6 +51,9 @@ Port de Maison (portdemaison.com). Керується з Odoo 19 (модуль `
 
 `<channel>` ∈ `viber`, `telegram`, `whatsapp`.
 
+**Запропоноване розширення (чекає погодження власника):** у вхідних Telegram `phone` може бути `null`
+(користувач приховує номер), додаються необов'язкові `user_id` і `username`.
+
 **Обов'язкові властивості мостів**
 - Ідемпотентність: повторний `/send` з тим самим `message_id` не створює дубль; вхідні дедуплікуються за `external_id`.
 - Черга відправки строго послідовна; випадкова пауза між повідомленнями (за замовчуванням 4–10 с, env).
@@ -78,6 +81,7 @@ CLAUDE.md                 цей файл
 .gitignore
 docker-compose.yml        (фаза 2+) кореневий compose, include сервісів
 .env.example              (фаза 2+) лише плейсхолдери
+common/bridge_core/       спільне ядро мостів (README.md там)
 viber-bridge/             Dockerfile, supervisord.conf, entrypoint.sh, app/ (FastAPI), README.md
 telegram-userbot/         app/, login.py, README.md
 whatsapp-adapter/         app/, README.md (Evolution API — окремий сервіс у compose)
@@ -114,7 +118,10 @@ docs/                     viber-db-schema.md, runbook.md, whatsapp-onboarding.md
 - Фаза 0 виконана. Стартових файлів Viber не було — `viber-bridge/` написано з нуля.
 - Фаза 2 (частково): API, черги, ліміти, доставка в Odoo, Docker-образ написані; тести `viber-bridge/tests`.
   Чекають живого Viber: SQL за схемою `viber.db` (`docs/viber-db-schema.md`) і `verify_target()`.
-  До того `VIBER_SEND_ENABLED=false`. Образ ще не збирався.
+  До того `SEND_ENABLED=false`. Образ ще не збирався.
+- Спільне ядро мостів: `common/bridge_core` (контракт, SQLite-черги, SenderLoop, OdooDelivery, FastAPI).
+  Образи збираються з кореня репозиторію (`context: ..`), корінь має `.dockerignore`.
+- Фаза 3: `telegram-userbot/` написаний, 12 тестів; з реальним Telegram ще не запускався.
 - Фаза 1: `ops/bootstrap.sh`, `ops/wireguard/` написані (shellcheck чистий), на реальному хості ще не запускались.
   Прийняті за замовчуванням (питання до власника відкриті): WG `10.77.0.0/24`, hub `.1`, Odoo `.2`, UDP 51820;
   мости → Odoo через `http://10.77.0.2:8069` (порт `web` на WG-IP); користувач `deploy`; SSH-порт не змінюється.
@@ -123,3 +130,8 @@ docs/                     viber-db-schema.md, runbook.md, whatsapp-onboarding.md
 - Ніколи не вставляти текст, доки `verify_target(phone)` не довів, що активний чат — цього номера.
 - Повідомлення, що зависли в `sending` після падіння, → `error`, без повторної відправки.
 - Без baseline з `viber.db` спроба відправки не починається і не з'їдає ліміт.
+
+Відомі інваріанти telegram-userbot:
+- Повідомлення від `777000` (коди входу), ботів, груп і каналів ніколи не пересилаються в Odoo.
+- `send_message(..., parse_mode=None)` — текст оператора без Markdown.
+- `startup()` не блокується на мережі; підключення — у фоновому моніторі.

@@ -309,6 +309,10 @@ class Store:
                 (key, value),
             )
 
+    def kv_delete(self, key: str) -> None:
+        with self._tx() as db:
+            db.execute("DELETE FROM kv WHERE key=?", (key,))
+
     def last_activity(self) -> float | None:
         rows = self._q(
             "SELECT MAX(t) FROM (SELECT MAX(updated_at) t FROM outbox WHERE state='sent'"

@@ -1,0 +1,6 @@
+# Direct dependencies (pinned). Full transitive lock: requirements.lock
+fastapi==0.142.0
+uvicorn==0.53.0
+httpx==0.28.1
+pydantic==2.13.5
+telethon==1.45.0
