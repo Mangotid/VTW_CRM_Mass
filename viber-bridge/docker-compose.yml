@@ -1,0 +1,39 @@
+# Viber bridge. Ports are published only on the hub's WireGuard address.
+# Requires wg0 to be up before Docker starts (see ops/, phase 1).
+name: pdm-viber
+
+services:
+  viber-bridge:
+    build:
+      context: .
+      args:
+        VIBER_DEB_SHA256: ${VIBER_DEB_SHA256:?set VIBER_DEB_SHA256 in .env}
+    image: pdm/viber-bridge:0.1.0
+    env_file: .env
+    environment:
+      TZ: Europe/Kyiv
+      DATA_DIR: /data
+      DEBUG_DIR: /debug
+      VIBER_HOME: /home/viber/.ViberPC
+    ports:
+      - "${WG_BIND_IP:?set WG_BIND_IP in .env}:${VIBER_BRIDGE_PORT:-8101}:8101"
+      - "${WG_BIND_IP}:${VIBER_NOVNC_PORT:-6080}:6080"
+    volumes:
+      - viber_profile:/home/viber/.ViberPC
+      - viber_state:/data
+      - viber_debug:/debug
+    mem_limit: 2g
+    shm_size: 512m
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  viber_profile:   # Viber account session + viber.db (sensitive)
+  viber_state:     # bridge SQLite queues (sensitive)
+  viber_debug:     # failure screenshots (sensitive, auto-pruned)
