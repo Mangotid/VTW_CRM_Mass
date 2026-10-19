@@ -53,7 +53,12 @@ class EvolutionClient:
         }
 
     async def instance_exists(self) -> bool:
-        data = await self._req("GET", "/instance/fetchInstances", params={"instanceName": self.instance})
+        try:
+            data = await self._req("GET", "/instance/fetchInstances", params={"instanceName": self.instance})
+        except EvolutionError as exc:
+            if exc.status == 404:  # 2.3.7 raises NotFoundException for an unknown instanceName
+                return False
+            raise
         items = data if isinstance(data, list) else [data]
         return any((i or {}).get("name") == self.instance or (i or {}).get("instanceName") == self.instance
                    for i in items if isinstance(i, dict))

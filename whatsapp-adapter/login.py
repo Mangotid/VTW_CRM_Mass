@@ -47,7 +47,8 @@ async def main() -> int:
         print("Not linked within 3 minutes. Run login.py again for a new code.")
         return 1
     except EvolutionError as exc:
-        print(f"Evolution API error {exc.status}.")
+        detail = exc.detail.get("response", exc.detail) if isinstance(exc.detail, dict) else exc.detail
+        print(f"Evolution API error {exc.status}: {str(detail)[:300]}")
         return 1
     finally:
         await evo.aclose()

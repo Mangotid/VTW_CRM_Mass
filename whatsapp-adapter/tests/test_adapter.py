@@ -150,6 +150,29 @@ def test_evolution_error_exists_false_is_not_found():
     assert not EvolutionError(500, {"exists": False}).not_on_whatsapp()
 
 
+def test_missing_instance_is_created(settings, store):
+    fake = FakeEvolution()
+    created = []
+    base = fake.handler
+
+    def handler(request):
+        if request.url.path == "/instance/fetchInstances" and not created:
+            return httpx.Response(404, json={"status": 404, "error": "Not Found",
+                                             "response": {"message": ['Instance "pdm" not found']}})
+        if request.url.path == "/instance/create":
+            body = json.loads(request.content)
+            assert body["integration"] == "WHATSAPP-BAILEYS" and body["groupsIgnore"] is True
+            assert body["webhook"]["headers"]["X-Webhook-Secret"] == WEBHOOK_SECRET
+            created.append(body["instanceName"])
+            return httpx.Response(201, json={"instance": {"instanceName": "pdm"}})
+        return base(request)
+
+    fake.handler = handler
+    b = _bridge(settings, store, fake)
+    asyncio.run(b.check_evolution())
+    assert created == ["pdm"] and b.webhook_ready and b.state == "open"
+
+
 def test_check_evolution_sets_webhook_and_state(settings, store):
     b = _bridge(settings, store, FakeEvolution())
     asyncio.run(b.check_evolution())
