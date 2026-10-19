@@ -22,6 +22,7 @@ RUN apt-get update \
       xvfb fluxbox x11vnc novnc websockify supervisor \
       xclip xdotool xdg-utils x11-utils imagemagick dbus-x11 \
       python3 python3-venv sqlite3 \
+      at-spi2-core gir1.2-atspi-2.0 python3-gi \
       fonts-dejavu-core fonts-noto-color-emoji \
  && rm -rf /var/lib/apt/lists/* \
  && install -d -m 1777 /tmp/.X11-unix
@@ -65,6 +66,7 @@ RUN python3 -m venv /opt/bridge/venv \
 
 COPY common/bridge_core /opt/bridge/bridge_core
 COPY viber-bridge/app /opt/bridge/app
+COPY viber-bridge/tools /opt/bridge/tools
 COPY viber-bridge/supervisord.conf /etc/supervisor/viber-bridge.conf
 COPY --chmod=755 viber-bridge/entrypoint.sh /usr/local/bin/entrypoint.sh
 
